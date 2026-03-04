@@ -1,0 +1,23 @@
+bug_type,exc_type,exc_message,filename,lineno,count
+bonus,UnicodeEncodeError,'charmap' codec can't encode character '\ufffd' in position 36: character maps to <undefined>,encodings\cp1252.py,19,1
+bonus,UnicodeEncodeError,'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>,encodings\cp1252.py,19,2
+bonus,UnicodeEncodeError,'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>,encodings\cp1252.py,19,4
+bonus,UnicodeEncodeError,'charmap' codec can't encode character '\ufffd' in position 39: character maps to <undefined>,encodings\cp1252.py,19,1
+bonus,UnicodeEncodeError,'charmap' codec can't encode character '\ufffd' in position 41: character maps to <undefined>,encodings\cp1252.py,19,2
+bonus,UnicodeEncodeError,'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>,encodings\cp1252.py,19,3
+bonus,UnicodeEncodeError,'charmap' codec can't encode character '\ufffd' in position 46: character maps to <undefined>,encodings\cp1252.py,19,1
+bonus,UnicodeEncodeError,'charmap' codec can't encode character '\ufffd' in position 47: character maps to <undefined>,encodings\cp1252.py,19,1
+bonus,UnicodeEncodeError,'charmap' codec can't encode character '\ufffd' in position 48: character maps to <undefined>,encodings\cp1252.py,19,1
+bonus,UnicodeEncodeError,'charmap' codec can't encode characters in position 36-37: character maps to <undefined>,encodings\cp1252.py,19,1
+bonus,UnicodeEncodeError,'charmap' codec can't encode characters in position 38-39: character maps to <undefined>,encodings\cp1252.py,19,1
+invalidity,InvalidityBug,One of the octets are empty,buggy_ipyparse\ipv4_stv.py,80,10
+invalidity,ParseException,"Expected '.', found '1'  (at char 10), (line:1, col:11)",pyparsing\core.py,1340,1
+invalidity,ParseException,"Expected '.', found '249324'  (at char 7), (line:1, col:8)",pyparsing\core.py,1340,4
+invalidity,ParseException,"Expected '.', found '2f502'  (at char 3), (line:1, col:4)",pyparsing\core.py,1340,1
+invalidity,ParseException,"Expected '.', found '9'  (at char 2), (line:1, col:3)",pyparsing\core.py,1340,3
+invalidity,ParseException,"Expected '.', found '?'  (at char 4), (line:1, col:5)",pyparsing\core.py,1340,1
+invalidity,ParseException,"Expected '.', found '\x0e'  (at char 5), (line:1, col:6)",pyparsing\core.py,1340,2
+invalidity,ParseException,"Expected '.', found 'n0'  (at char 2), (line:1, col:3)",pyparsing\core.py,1340,1
+invalidity,ParseException,"Expected '.', found 'p0'  (at char 1), (line:1, col:2)",pyparsing\core.py,1340,2
+invalidity,ParseException,"Expected '.', found end of text  (at char 6), (line:1, col:7)",pyparsing\core.py,1340,1
+validity,ParseException,"Expected '.', found '5'  (at char 2), (line:1, col:3)",pyparsing\core.py,1340,5

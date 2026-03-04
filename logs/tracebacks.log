@@ -1,0 +1,667 @@
+================================================================================
+Timestamp : 2026-03-04 12:59:36.866992+00:00
+Bug Type  : validity
+Exception: ParseException: Expected '.', found '5'  (at char 2), (line:1, col:3)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '5'  (at char 2), (line:1, col:3)
+
+
+================================================================================
+Timestamp : 2026-03-04 12:59:56.846103+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '249324'  (at char 7), (line:1, col:8)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '249324'  (at char 7), (line:1, col:8)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:00:21.338279+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '9'  (at char 2), (line:1, col:3)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '9'  (at char 2), (line:1, col:3)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:00:44.143501+00:00
+Bug Type  : invalidity
+Exception: InvalidityBug: One of the octets are empty
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 5155, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4612, in parseImpl
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 284, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 80, in convert_octet
+buggy_ipyparse.ipv4_stv.InvalidityBug: One of the octets are empty
+
+
+================================================================================
+Timestamp : 2026-03-04 13:01:20.306290+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '249324'  (at char 7), (line:1, col:8)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '249324'  (at char 7), (line:1, col:8)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:02:31.877125+00:00
+Bug Type  : validity
+Exception: ParseException: Expected '.', found '5'  (at char 2), (line:1, col:3)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '5'  (at char 2), (line:1, col:3)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:02:53.629148+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '249324'  (at char 7), (line:1, col:8)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '249324'  (at char 7), (line:1, col:8)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:03:14.127914+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '9'  (at char 2), (line:1, col:3)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '9'  (at char 2), (line:1, col:3)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:03:37.199242+00:00
+Bug Type  : invalidity
+Exception: InvalidityBug: One of the octets are empty
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 5155, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4612, in parseImpl
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 284, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 80, in convert_octet
+buggy_ipyparse.ipv4_stv.InvalidityBug: One of the octets are empty
+
+
+================================================================================
+Timestamp : 2026-03-04 13:04:09.114490+00:00
+Bug Type  : validity
+Exception: ParseException: Expected '.', found '5'  (at char 2), (line:1, col:3)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '5'  (at char 2), (line:1, col:3)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:05:20.616474+00:00
+Bug Type  : validity
+Exception: ParseException: Expected '.', found '5'  (at char 2), (line:1, col:3)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '5'  (at char 2), (line:1, col:3)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:05:41.955098+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '249324'  (at char 7), (line:1, col:8)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '249324'  (at char 7), (line:1, col:8)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:06:03.248213+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '9'  (at char 2), (line:1, col:3)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '9'  (at char 2), (line:1, col:3)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:06:24.058548+00:00
+Bug Type  : invalidity
+Exception: InvalidityBug: One of the octets are empty
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 5155, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4612, in parseImpl
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 284, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 80, in convert_octet
+buggy_ipyparse.ipv4_stv.InvalidityBug: One of the octets are empty
+
+
+================================================================================
+Timestamp : 2026-03-04 13:06:53.646382+00:00
+Bug Type  : invalidity
+Exception: InvalidityBug: One of the octets are empty
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 5155, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4612, in parseImpl
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 284, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 80, in convert_octet
+buggy_ipyparse.ipv4_stv.InvalidityBug: One of the octets are empty
+
+
+================================================================================
+Timestamp : 2026-03-04 13:07:14.530959+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found 'p0'  (at char 1), (line:1, col:2)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found 'p0'  (at char 1), (line:1, col:2)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:07:35.041157+00:00
+Bug Type  : invalidity
+Exception: InvalidityBug: One of the octets are empty
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 5155, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4612, in parseImpl
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 284, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 80, in convert_octet
+buggy_ipyparse.ipv4_stv.InvalidityBug: One of the octets are empty
+
+
+================================================================================
+Timestamp : 2026-03-04 13:07:55.083172+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '\x0e'  (at char 5), (line:1, col:6)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '\x0e'  (at char 5), (line:1, col:6)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:08:33.849042+00:00
+Bug Type  : invalidity
+Exception: InvalidityBug: One of the octets are empty
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 5155, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4612, in parseImpl
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 284, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 80, in convert_octet
+buggy_ipyparse.ipv4_stv.InvalidityBug: One of the octets are empty
+
+
+================================================================================
+Timestamp : 2026-03-04 13:08:56.098396+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found 'p0'  (at char 1), (line:1, col:2)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found 'p0'  (at char 1), (line:1, col:2)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:09:20.199473+00:00
+Bug Type  : invalidity
+Exception: InvalidityBug: One of the octets are empty
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 5155, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4612, in parseImpl
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 284, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 80, in convert_octet
+buggy_ipyparse.ipv4_stv.InvalidityBug: One of the octets are empty
+
+
+================================================================================
+Timestamp : 2026-03-04 13:09:43.387180+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '\x0e'  (at char 5), (line:1, col:6)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '\x0e'  (at char 5), (line:1, col:6)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:10:03.807124+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:10:25.317024+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode characters in position 38-39: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 38-39: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:10:46.895632+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:11:11.304913+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found end of text  (at char 6), (line:1, col:7)
+
+Traceback:
+Traceback (most recent call last):
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 2771, in parseImpl
+IndexError: string index out of range
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found end of text  (at char 6), (line:1, col:7)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:11:36.739832+00:00
+Bug Type  : invalidity
+Exception: InvalidityBug: One of the octets are empty
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 5155, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4634, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4634, in parseImpl
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 281, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 80, in convert_octet
+buggy_ipyparse.ipv4_stv.InvalidityBug: One of the octets are empty
+
+
+================================================================================
+Timestamp : 2026-03-04 13:12:01.627932+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 36: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 36: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:12:22.480123+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 41: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 41: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:12:44.245538+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:13:03.821928+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '?'  (at char 4), (line:1, col:5)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '?'  (at char 4), (line:1, col:5)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:13:24.208503+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode characters in position 36-37: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 36-37: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:13:46.466480+00:00
+Bug Type  : invalidity
+Exception: InvalidityBug: One of the octets are empty
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 5155, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4612, in parseImpl
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 284, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 80, in convert_octet
+buggy_ipyparse.ipv4_stv.InvalidityBug: One of the octets are empty
+
+
+================================================================================
+Timestamp : 2026-03-04 13:14:09.060253+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found 'n0'  (at char 2), (line:1, col:3)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found 'n0'  (at char 2), (line:1, col:3)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:14:30.660430+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 41: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 41: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:14:51.655703+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:15:13.127145+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:15:32.892564+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:15:55.543541+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 47: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 47: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:16:17.876085+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '1'  (at char 10), (line:1, col:11)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '1'  (at char 10), (line:1, col:11)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:16:47.967728+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 39: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 39: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:17:14.428616+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '2f502'  (at char 3), (line:1, col:4)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '2f502'  (at char 3), (line:1, col:4)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:17:35.904873+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:17:59.758337+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 48: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 48: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:18:23.223517+00:00
+Bug Type  : validity
+Exception: ParseException: Expected '.', found '5'  (at char 2), (line:1, col:3)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '5'  (at char 2), (line:1, col:3)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:18:50.100503+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:19:14.640013+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:19:44.642904+00:00
+Bug Type  : invalidity
+Exception: InvalidityBug: One of the octets are empty
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 5155, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4612, in parseImpl
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 284, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 80, in convert_octet
+buggy_ipyparse.ipv4_stv.InvalidityBug: One of the octets are empty
+
+
+================================================================================
+Timestamp : 2026-03-04 13:20:15.350250+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 46: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 46: character maps to <undefined>
+
+
