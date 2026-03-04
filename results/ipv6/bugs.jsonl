@@ -1,0 +1,103 @@
+{"idx": 1, "input": "2001:0db8:0000\u00100080:0000:ff00:0042:8329", "bug_type": "bonus", "exit_code": 0, "exception": "Expected ':', found '\\\\x10'  (at char 14), (line:1, col:15)"}
+{"idx": 2, "input": "2001:\u0010\u000f/ow\re00:0000:0000:f\ufffd\u0003Q0042:8329", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 62: character maps to <undefined>"}
+{"idx": 3, "input": "20\ufffd\u007f:\u0000\u0001(\ufffd\ufffdb#\u0017t:000:000:1f00:0042:8329", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 4, "input": "2001:0db8:000:00\ufffd00:0000:ff00:0042:8329", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 52: character maps to <undefined>"}
+{"idx": 5, "input": "20d1\ufffd\ufffddb8:000:0000:0\u000000:ff00:0042:(ff00:329", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 6, "input": "2001\u0000\u0001db\u0000\u000100:0042:000:0000:0000\u00188f\ufffd\u0339pF4=:8329", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 7, "input": "2001:0db8:0000:0\u0005:\ufffd\ufffd9\ufffd\ufffdP\ufffd:ff00:0042:8329", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode characters in position 54-55: character maps to <undefined>"}
+{"idx": 8, "input": "2001:0db8:0000:0000:0000:ff00:00\ufffd\u0000:8329", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 9, "input": "2001:0db8d0000:0000:0000:ff00:00\ufffd\ufffd:8329", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode characters in position 68-69: character maps to <undefined>"}
+{"idx": 10, "input": "2001:0db8:0000:\u0000\u000000:000000:ff00:004\ufffd:8329", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 11, "input": "2001:db8:0:0:0:0:192.0\ufffd\u0000.33", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 12, "input": "20011:db8:0:0:0\ufffd\u0010*1\ufffd92..2\ufffdZ?", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 51: character maps to <undefined>"}
+{"idx": 13, "input": "2;\u0000\ufffd:db8]\ufffd\u0019\u001f0:0:19\ufffd.0\ufffdU@)\ufffd", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 14, "input": "2001:db8:0:\ufffd\u00000:0:192.0.2.33", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 15, "input": "2001:db8:0:.330:0:0:192.\ufffd.2.33", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 60: character maps to <undefined>"}
+{"idx": 16, "input": "+00\u0000\ufffdb8:0:0:0:\u0013p:19*2.N.2.33", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 17, "input": "200:db8:0:0:0:0\ufffd\ufffd2.0.2*33", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode characters in position 51-52: character maps to <undefined>"}
+{"idx": 18, "input": "2011:db8:0:0:0:0:192.\u007f.2.33", "bug_type": "bonus", "exit_code": 0, "exception": "Expected '.', found '\\\\x7f'  (at char 21), (line:1, col:22)"}
+{"idx": 19, "input": "201:db8\ufffd:0::0:0:1-2.0.2.33", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 43: character maps to <undefined>"}
+{"idx": 20, "input": "2001:db8: :0:0:0:192.0.2.33", "bug_type": "bonus", "exit_code": 0, "exception": "Expected W:(0-9A-Fa-f){1,5}, found ' '  (at char 9), (line:1, col:10)"}
+{"idx": 21, "input": "20\ufffd\ufffd1db8\ufffd\u0004:", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode characters in position 38-39: character maps to <undefined>"}
+{"idx": 22, "input": "2\u000f01db8::", "bug_type": "bonus", "exit_code": 0, "exception": "Expected ':', found '\\\\x0f'  (at char 1), (line:1, col:2)"}
+{"idx": 23, "input": "\ufffd\u000301:\u0001\u00008::", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 24, "input": "200:\u0000\u0000Dc::", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 25, "input": "\ufffd#[01d:db\ufffd\u0000:", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 26, "input": "2\u0000\u00021:db8::", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 27, "input": "20\u0000\ufffd:dc8::", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 28, "input": "2001*db008::", "bug_type": "bonus", "exit_code": 0, "exception": "Expected ':', found '*'  (at char 4), (line:1, col:5)"}
+{"idx": 29, "input": "2M\ufffd\u0000:d\ufffd8::", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 30, "input": "20\u0000\u0002:db8|\u0011", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 31, "input": "2p01\u0012\ufffddb\ufffd8::1", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 41: character maps to <undefined>"}
+{"idx": 32, "input": "2\ufffd0010db8::1", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 37: character maps to <undefined>"}
+{"idx": 33, "input": ":01:ub8::1", "bug_type": "bonus", "exit_code": 0, "exception": ""}
+{"idx": 34, "input": "\ufffd0:\u001e\ufffde8:\u001e\ufffd", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 36: character maps to <undefined>"}
+{"idx": 35, "input": "\ufffd2101:tIb8\ufffd\ufffd\ufffd1", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 36: character maps to <undefined>"}
+{"idx": 36, "input": "C0m\u0000\ufffd8d\u00008::1", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 37, "input": "2C01:db8:S:1", "bug_type": "bonus", "exit_code": 0, "exception": "Expected W:(0-9A-Fa-f){1,5}, found 'S'  (at char 9), (line:1, col:10)"}
+{"idx": 38, "input": "2001:dSb8b8::1", "bug_type": "bonus", "exit_code": 0, "exception": "Expected ':', found 'Sb8b8'  (at char 6), (line:1, col:7)"}
+{"idx": 39, "input": "2001:\ufffdb8::1", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 41: character maps to <undefined>"}
+{"idx": 40, "input": "2001:b18\ufffd:q", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 44: character maps to <undefined>"}
+{"idx": 41, "input": "2u00\u0010\u000f#\ufffd\u001b::192.0.2.33", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 43: character maps to <undefined>"}
+{"idx": 42, "input": "2001:db8::192.0.2A33", "bug_type": "bonus", "exit_code": 0, "exception": "Expected end of text, found '.'  (at char 13), (line:1, col:14)"}
+{"idx": 43, "input": "2001:db8::192.0\ufffd.2.33", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 51: character maps to <undefined>"}
+{"idx": 44, "input": "20::1\ufffd:db8:\u0000\u0001920.2\u007f3\ufffd", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 45, "input": "2001:e\ufffd8:;Y\u00172.0.233", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 42: character maps to <undefined>"}
+{"idx": 46, "input": "2001Sdb8::1\u0001\ufffd.0.2.\u000b3e", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 48: character maps to <undefined>"}
+{"idx": 47, "input": "27001\ufffd\u001ad\u007f8\ufffd:\ufffd\ufffd\u0000.0.2.\ufffd\ufffd", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 48, "input": "2\ufffd\ufffd1:db<:\u0000\ufffd9.\u0000\ufffd\ufffd.37", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 49, "input": "d001:\u0000\u00008::192.0.2*33", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 50, "input": "200\ufffd\u0007\ufffdK:2\ufffd\u00032.0?2.3u", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 39: character maps to <undefined>"}
+{"idx": 51, "input": "22401$\ufffd\u0014\ufffd:1:2", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 42: character maps to <undefined>"}
+{"idx": 52, "input": "200y1:db::2", "bug_type": "bonus", "exit_code": 0, "exception": "Expected ':', found 'y1'  (at char 3), (line:1, col:4)"}
+{"idx": 53, "input": "2001:kb8\ufffd:t1:\u0000", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 54, "input": "2001\u0014\ufffdb\u0001:\u0000\u0004\u0000\ufffd\u0001", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 55, "input": "20\u0007W:db\ufffd8:&j:2", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 43: character maps to <undefined>"}
+{"idx": 56, "input": "200d:db8:\ufffd\ufffd\u000b2", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode characters in position 45-46: character maps to <undefined>"}
+{"idx": 57, "input": "22\ufffd9\u00019\u00111*d\ufffd8::1:2", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 38: character maps to <undefined>"}
+{"idx": 58, "input": "2001:db\u0005\u000fY1:2", "bug_type": "bonus", "exit_code": 0, "exception": "Expected ':', found '\\\\x05'  (at char 7), (line:1, col:8)"}
+{"idx": 59, "input": "\u0000\ufffd0\ufffd\ufffdd\ufffd8::1:2", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 60, "input": "2201:db8)\ufffd:2", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 45: character maps to <undefined>"}
+{"idx": 61, "input": "20C\u00101:d\ufffdO7\ufffd1:192.\ufffdo2.33", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 43: character maps to <undefined>"}
+{"idx": 62, "input": "\ufffd\ufffd01\ufffdf\u0003b\ufffd::>192.0.2\ufffd.33", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode characters in position 36-37: character maps to <undefined>"}
+{"idx": 63, "input": "2001:db18::1:192.0.\u0000\u000233", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 64, "input": "2001:db8::\u00008\u0005\ufffd\ufffd20.2.33", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 65, "input": "2001:db92.0.28/2.0.::!:19\u0006\ufffd\u00150\r\u000e3", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 62: character maps to <undefined>"}
+{"idx": 66, "input": "20\ufffd1:dbd::1:59\ufffdQ0.2.\ufffd3", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 38: character maps to <undefined>"}
+{"idx": 67, "input": "20p1 db8>:\ufffd:192.0.2.\ufffd3\ufffdv", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 46: character maps to <undefined>"}
+{"idx": 68, "input": "2001\ufffddbI::1:192.0.2.33", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 40: character maps to <undefined>"}
+{"idx": 69, "input": "20\u0010(:db8::1:\ufffd9.0.2.\ufffd\ufffd\ufffd", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 48: character maps to <undefined>"}
+{"idx": 70, "input": "b82\ufffd\u0000\u00010:db8::1:192.:10.2.33", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 71, "input": "2001:\u00198::1:2:3", "bug_type": "bonus", "exit_code": 0, "exception": "Expected W:(0-9A-Fa-f){1,5}, found '\\\\x19'  (at char 5), (line:1, col:6)"}
+{"idx": 72, "input": "20\ufffd\u007f:db8::1:2:3", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 38: character maps to <undefined>"}
+{"idx": 73, "input": "2001:db8\ufffd:1:2:3", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 44: character maps to <undefined>"}
+{"idx": 74, "input": "\u007f20L1:!db8:\b\u00042:3", "bug_type": "bonus", "exit_code": 0, "exception": ""}
+{"idx": 75, "input": "2001f@b8\u000b:\ufffdE\ufffd2:3\ufffd", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 46: character maps to <undefined>"}
+{"idx": 76, "input": "2\u0000\u00001:db8::12:3", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 77, "input": "2001:db8::%1:2:3", "bug_type": "bonus", "exit_code": 0, "exception": "Expected end of text, found '%'  (at char 10), (line:1, col:11)"}
+{"idx": 78, "input": "2\ufffd:301W|b8\u0004\":1\ufffd\u007f:3", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 37: character maps to <undefined>"}
+{"idx": 79, "input": "2001\ufffddb8:K1:2:3", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 40: character maps to <undefined>"}
+{"idx": 80, "input": "200\ufffd\ufffdyb8::1:4:13", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode characters in position 39-40: character maps to <undefined>"}
+{"idx": 81, "input": "20\ufffd2:d\u0001::1\u0001:1921.0..-33", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 38: character maps to <undefined>"}
+{"idx": 82, "input": "t2001:db8::1:2:192.0.2.3", "bug_type": "bonus", "exit_code": 0, "exception": ""}
+{"idx": 83, "input": "2001:db8::1:2<@@\ufffd\ufffd/:db.2.33", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode characters in position 52-53: character maps to <undefined>"}
+{"idx": 84, "input": "201\ufffddb8::1:\u0000\u00011r92.2.2.,3", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 85, "input": "2001:db8::1:2:192.0.y.33", "bug_type": "bonus", "exit_code": 0, "exception": "Expected end of text, found '.'  (at char 17), (line:1, col:18)"}
+{"idx": 86, "input": "20p\ufffd1:db8::1:2\ufffd\ufffd\ufffd-2.31.0.2.31", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 39: character maps to <undefined>"}
+{"idx": 87, "input": "2001:db8::\ufffd\u00032:192.0.2.33", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 46: character maps to <undefined>"}
+{"idx": 88, "input": "Q\ufffd\r1:`9b8:Q1:2:K92.0.\ufffd\u000333", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 37: character maps to <undefined>"}
+{"idx": 89, "input": "201\"\ufffdb8::1::192.\u0000\ufffd2.33", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 90, "input": "200!:db8::1:2:192\"0.2.33", "bug_type": "bonus", "exit_code": 0, "exception": "Expected ':', found '!'  (at char 3), (line:1, col:4)"}
+{"idx": 91, "input": "2001:v\ufffd8::1:\u0000\u00003:\ufffd\ufffd", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 92, "input": "2001:db8\u001a:1:2:3\u001a4", "bug_type": "bonus", "exit_code": 0, "exception": "Expected ':', found '\\\\x1a'  (at char 8), (line:1, col:9)"}
+{"idx": 93, "input": "2001:db8:1:2\u000034", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 94, "input": "Y:d\ufffd200Y:d\ufffdb8::1:\u00142[94", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 39: character maps to <undefined>"}
+{"idx": 95, "input": "200\ufffd\u000e\ufffdb8\ufffd\u007fbb8::b1:2:3\ufffd,\ufffd:b1:24", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 39: character maps to <undefined>"}
+{"idx": 96, "input": "2001:db8::1:2209\ufffd\ufffd4", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode characters in position 52-53: character maps to <undefined>"}
+{"idx": 97, "input": "C420\u0000\u0004\ufffd:db8::1:2:2::34", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 98, "input": "2001:db8:\u001a\ufffd:::3:401:d", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 46: character maps to <undefined>"}
+{"idx": 99, "input": "2001:db8:1:2:\u0010:\u0000", "bug_type": "CRASH", "exit_code": null, "exception": "embedded null character"}
+{"idx": 101, "input": "2\ufffd01:db8::1:2:\ufffd\u0011G2.0.2n3\u0018", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 37: character maps to <undefined>"}
+{"idx": 102, "input": "20\ufffd2\ufffd00\u0012:db8::1:2\u007f:192.0.2.33", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 38: character maps to <undefined>"}
+{"idx": 103, "input": "2001:dz8::^:2:3DW?\\.0.2.3\ufffd3", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 61: character maps to <undefined>"}
+{"idx": 104, "input": "2001:db8::1:2:3:1\ufffd2.>.2.33", "bug_type": "bonus", "exit_code": 0, "exception": "'charmap' codec can't encode character '\\\\ufffd' in position 53: character maps to <undefined>"}

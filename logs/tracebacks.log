@@ -665,3 +665,1289 @@ Traceback (most recent call last):
 UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 46: character maps to <undefined>
 
 
+================================================================================
+Timestamp : 2026-03-04 13:39:15.147153+00:00
+Bug Type  : invalidity
+Exception: InvalidityBug: One of the octets are empty
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 5155, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4612, in parseImpl
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 284, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 80, in convert_octet
+buggy_ipyparse.ipv4_stv.InvalidityBug: One of the octets are empty
+
+
+================================================================================
+Timestamp : 2026-03-04 13:39:33.902234+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found 'p0'  (at char 1), (line:1, col:2)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found 'p0'  (at char 1), (line:1, col:2)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:39:52.142135+00:00
+Bug Type  : invalidity
+Exception: InvalidityBug: One of the octets are empty
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 5155, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4612, in parseImpl
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 284, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 80, in convert_octet
+buggy_ipyparse.ipv4_stv.InvalidityBug: One of the octets are empty
+
+
+================================================================================
+Timestamp : 2026-03-04 13:40:13.430832+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '\x0e'  (at char 5), (line:1, col:6)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '\x0e'  (at char 5), (line:1, col:6)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:40:34.124848+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:40:57.365363+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode characters in position 38-39: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 38-39: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:41:22.944123+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:41:44.324936+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found end of text  (at char 6), (line:1, col:7)
+
+Traceback:
+Traceback (most recent call last):
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 2771, in parseImpl
+IndexError: string index out of range
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found end of text  (at char 6), (line:1, col:7)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:42:04.389346+00:00
+Bug Type  : invalidity
+Exception: InvalidityBug: One of the octets are empty
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 5155, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4634, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4634, in parseImpl
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 281, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 80, in convert_octet
+buggy_ipyparse.ipv4_stv.InvalidityBug: One of the octets are empty
+
+
+================================================================================
+Timestamp : 2026-03-04 13:42:24.122573+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 36: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 36: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:42:46.008562+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 41: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 41: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:43:08.693070+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:43:29.347651+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '?'  (at char 4), (line:1, col:5)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '?'  (at char 4), (line:1, col:5)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:43:50.665252+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode characters in position 36-37: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 36-37: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:44:12.958905+00:00
+Bug Type  : invalidity
+Exception: InvalidityBug: One of the octets are empty
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 5155, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4612, in parseImpl
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 284, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 80, in convert_octet
+buggy_ipyparse.ipv4_stv.InvalidityBug: One of the octets are empty
+
+
+================================================================================
+Timestamp : 2026-03-04 13:44:32.090115+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found 'n0'  (at char 2), (line:1, col:3)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found 'n0'  (at char 2), (line:1, col:3)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:44:53.671020+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 41: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 41: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:45:16.362278+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:45:37.441493+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:46:00.570961+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:46:24.053562+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 47: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 47: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:46:45.948039+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '1'  (at char 10), (line:1, col:11)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '1'  (at char 10), (line:1, col:11)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:47:18.369754+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 39: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 39: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:47:21.283402+00:00
+Bug Type  : functional
+Exception: FunctionalBug: Invalid ipv4 calculation.
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 284, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 134, in convert_ipv4
+buggy_ipyparse.ipv4_stv.FunctionalBug: Invalid ipv4 calculation.
+
+
+================================================================================
+Timestamp : 2026-03-04 13:47:53.927169+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '2f502'  (at char 3), (line:1, col:4)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '2f502'  (at char 3), (line:1, col:4)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:48:25.067030+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:48:28.190447+00:00
+Bug Type  : functional
+Exception: FunctionalBug: Invalid ipv4 calculation.
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 284, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 134, in convert_ipv4
+buggy_ipyparse.ipv4_stv.FunctionalBug: Invalid ipv4 calculation.
+
+
+================================================================================
+Timestamp : 2026-03-04 13:48:59.054427+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 48: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 48: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:49:04.113629+00:00
+Bug Type  : invalidity
+Exception: ParseException: Expected '.', found '1'  (at char 10), (line:1, col:11)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '1'  (at char 10), (line:1, col:11)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:49:32.421513+00:00
+Bug Type  : validity
+Exception: ParseException: Expected '.', found '5'  (at char 2), (line:1, col:3)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '5'  (at char 2), (line:1, col:3)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:49:56.728025+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:50:26.617177+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:50:52.815943+00:00
+Bug Type  : invalidity
+Exception: InvalidityBug: One of the octets are empty
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 220, in <module>
+  File "pyparsing\core.py", line 1328, in parse_string
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 5155, in parseImpl
+  File "pyparsing\core.py", line 950, in _parseNoCache
+  File "pyparsing\core.py", line 4612, in parseImpl
+  File "pyparsing\core.py", line 989, in _parseNoCache
+  File "pyparsing\core.py", line 284, in wrapper
+  File "buggy_ipyparse\ipv4_stv.py", line 80, in convert_octet
+buggy_ipyparse.ipv4_stv.InvalidityBug: One of the octets are empty
+
+
+================================================================================
+Timestamp : 2026-03-04 13:51:13.509596+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 46: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv4_parser_stv.py", line 219, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 46: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:58:35.165966+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected ':', found '\x10'  (at char 14), (line:1, col:15)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected ':', found '\x10'  (at char 14), (line:1, col:15)
+
+
+================================================================================
+Timestamp : 2026-03-04 13:58:58.424895+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 62: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 62: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:59:20.763907+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 52: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 52: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 13:59:44.567420+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode characters in position 54-55: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 54-55: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:00:07.229127+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode characters in position 68-69: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 68-69: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:00:31.496069+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 51: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 51: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:00:51.508491+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 60: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 60: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:01:12.371785+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode characters in position 51-52: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 51-52: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:01:34.139848+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected '.', found '\x7f'  (at char 21), (line:1, col:22)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected '.', found '\x7f'  (at char 21), (line:1, col:22)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:01:53.154164+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 43: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 43: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:02:16.293334+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected W:(0-9A-Fa-f){1,5}, found ' '  (at char 9), (line:1, col:10)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected W:(0-9A-Fa-f){1,5}, found ' '  (at char 9), (line:1, col:10)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:02:36.102266+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode characters in position 38-39: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 38-39: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:02:55.608277+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected ':', found '\x0f'  (at char 1), (line:1, col:2)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected ':', found '\x0f'  (at char 1), (line:1, col:2)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:03:14.621695+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected ':', found '*'  (at char 4), (line:1, col:5)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected ':', found '*'  (at char 4), (line:1, col:5)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:03:32.902931+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 41: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 41: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:03:52.135168+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:04:12.291792+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected {{W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} [W:(0-9A-Fa-f){1,5} Suppress:(':')] W:(0-9A-Fa-f){1,5} ^ {{W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]]]] {'::' ^ ':::'}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]] {'::' ^ ':::'} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5} Suppress:(':') Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {'::' ^ ':::'} [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':')]]]]]] {W:(0-9A-Fa-f){1,5} ^ Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})}}, found ':'  (at char 0), (line:1, col:1)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected {{W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} [W:(0-9A-Fa-f){1,5} Suppress:(':')] W:(0-9A-Fa-f){1,5} ^ {{W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]]]] {'::' ^ ':::'}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]] {'::' ^ ':::'} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5} Suppress:(':') Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {'::' ^ ':::'} [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':')]]]]]] {W:(0-9A-Fa-f){1,5} ^ Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})}}, found ':'  (at char 0), (line:1, col:1)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:04:30.545748+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 36: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 36: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:04:48.916931+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 36: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 36: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:05:10.373140+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected W:(0-9A-Fa-f){1,5}, found 'S'  (at char 9), (line:1, col:10)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected W:(0-9A-Fa-f){1,5}, found 'S'  (at char 9), (line:1, col:10)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:05:36.093152+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected ':', found 'Sb8b8'  (at char 6), (line:1, col:7)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected ':', found 'Sb8b8'  (at char 6), (line:1, col:7)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:05:57.282681+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 41: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 41: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:06:16.769171+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:06:36.816716+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 43: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 43: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:06:58.824797+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected end of text, found '.'  (at char 13), (line:1, col:14)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected end of text, found '.'  (at char 13), (line:1, col:14)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:07:20.899582+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 51: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 51: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:07:39.774106+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 42: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 42: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:07:57.256057+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 48: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 48: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:08:18.084299+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 39: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 39: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:08:37.955225+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 42: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 42: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:08:57.149560+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected ':', found 'y1'  (at char 3), (line:1, col:4)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected ':', found 'y1'  (at char 3), (line:1, col:4)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:09:16.605526+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 43: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 43: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:09:35.715540+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode characters in position 45-46: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 45-46: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:09:55.169273+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:10:14.653829+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected ':', found '\x05'  (at char 7), (line:1, col:8)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected ':', found '\x05'  (at char 7), (line:1, col:8)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:10:33.523032+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 45: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 45: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:10:51.972475+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 43: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 43: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:11:12.738463+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode characters in position 36-37: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 36-37: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:11:33.677258+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 62: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 62: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:11:51.642810+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:12:10.771711+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 46: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 46: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:12:29.871058+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 40: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 40: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:12:48.200275+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 48: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 48: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:13:08.468753+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected W:(0-9A-Fa-f){1,5}, found '\x19'  (at char 5), (line:1, col:6)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected W:(0-9A-Fa-f){1,5}, found '\x19'  (at char 5), (line:1, col:6)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:13:27.861107+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:13:45.458039+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 44: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:14:06.442092+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected {{W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} [W:(0-9A-Fa-f){1,5} Suppress:(':')] W:(0-9A-Fa-f){1,5} ^ {{W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]]]] {'::' ^ ':::'}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]] {'::' ^ ':::'} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5} Suppress:(':') Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {'::' ^ ':::'} [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':')]]]]]] {W:(0-9A-Fa-f){1,5} ^ Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})}}, found '\x7f'  (at char 0), (line:1, col:1)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected {{W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} [W:(0-9A-Fa-f){1,5} Suppress:(':')] W:(0-9A-Fa-f){1,5} ^ {{W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]]]] {'::' ^ ':::'}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]] {'::' ^ ':::'} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5} Suppress:(':') Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {'::' ^ ':::'} [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':')]]]]]] {W:(0-9A-Fa-f){1,5} ^ Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})}}, found '\x7f'  (at char 0), (line:1, col:1)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:14:26.606972+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 46: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 46: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:14:46.234484+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected end of text, found '%'  (at char 10), (line:1, col:11)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected end of text, found '%'  (at char 10), (line:1, col:11)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:15:05.281165+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:15:39.155335+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 40: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 40: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:15:57.928579+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode characters in position 39-40: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 39-40: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:16:16.433517+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:16:37.720484+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected {{W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} [W:(0-9A-Fa-f){1,5} Suppress:(':')] W:(0-9A-Fa-f){1,5} ^ {{W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]]]] {'::' ^ ':::'}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]] {'::' ^ ':::'} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5} Suppress:(':') Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {'::' ^ ':::'} [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':')]]]]]] {W:(0-9A-Fa-f){1,5} ^ Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})}}, found 't2001'  (at char 0), (line:1, col:1)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected {{W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} [W:(0-9A-Fa-f){1,5} Suppress:(':')] W:(0-9A-Fa-f){1,5} ^ {{W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]]]] {'::' ^ ':::'}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]] {'::' ^ ':::'} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]] {'::' ^ ':::'} W:(0-9A-Fa-f){1,5} Suppress:(':') W:(0-9A-Fa-f){1,5} Suppress:(':') Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}]] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})} ^ {W:(0-9A-Fa-f){1,5} [Suppress:(':') W:(0-9A-Fa-f){1,5}] {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {W:(0-9A-Fa-f){1,5} {'::' ^ ':::'} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} {W:(0-9A-Fa-f){1,5} Suppress:(':')} W:(0-9A-Fa-f){1,5}} ^ {'::' ^ ':::'} [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':') [W:(0-9A-Fa-f){1,5} Suppress:(':')]]]]]] {W:(0-9A-Fa-f){1,5} ^ Group:({Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}}) {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})} {Suppress:('.') Combine:({['0']... ^ {Suppress:(['0']) (1-9)} ^ {Suppress:(['0']) W:(1-9, 0-9){2}} ^ {Suppress:(['0']) '1' W:(0-9){2}} ^ {Suppress:(['0']) '2' W:(0-4, 0-9){2}} ^ {Suppress:(['0']) '25' (0-4)}})}})}}, found 't2001'  (at char 0), (line:1, col:1)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:16:57.789351+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode characters in position 52-53: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 52-53: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:17:17.566245+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected end of text, found '.'  (at char 17), (line:1, col:18)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected end of text, found '.'  (at char 17), (line:1, col:18)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:17:37.835190+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 39: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 39: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:17:55.808588+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 46: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 46: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:18:13.922937+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:18:35.554130+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected ':', found '!'  (at char 3), (line:1, col:4)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected ':', found '!'  (at char 3), (line:1, col:4)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:19:05.431079+00:00
+Bug Type  : bonus
+Exception: ParseException: Expected ':', found '\x1a'  (at char 8), (line:1, col:9)
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 219, in <module>
+  File "pyparsing\core.py", line 1340, in parse_string
+pyparsing.exceptions.ParseException: Expected ':', found '\x1a'  (at char 8), (line:1, col:9)
+
+
+================================================================================
+Timestamp : 2026-03-04 14:19:26.378023+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 39: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 39: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:19:45.113995+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 39: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 39: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:20:05.235037+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode characters in position 52-53: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 52-53: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:20:32.252780+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 46: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 46: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:21:21.360353+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 37: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:21:45.332250+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 38: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:22:10.161943+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 61: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 61: character maps to <undefined>
+
+
+================================================================================
+Timestamp : 2026-03-04 14:22:29.336613+00:00
+Bug Type  : bonus
+Exception: UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 53: character maps to <undefined>
+
+Traceback:
+Traceback (most recent call last):
+  File "ipv6_parser_stv.py", line 218, in <module>
+  File "encodings\cp1252.py", line 19, in encode
+UnicodeEncodeError: 'charmap' codec can't encode character '\ufffd' in position 53: character maps to <undefined>
+
+

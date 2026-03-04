@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(timeout 5 ./ipv4ipv6/win-ipv4-parser.exe:*)",
-      "Bash(python:*)"
-    ]
-  }
-}

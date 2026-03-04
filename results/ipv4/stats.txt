@@ -1,6 +1,6 @@
 target          : ipv4
 total_inputs    : 40
-elapsed_seconds : 723.4
+elapsed_seconds : 739.4
 inputs_per_sec  : 0.1
 bug_counts      : {'CRASH': 9, 'invalidity': 12, 'bonus': 18, 'validity': 1}
 unique_exceptions: 20
