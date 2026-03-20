@@ -1,0 +1,4 @@
+# Phase 1 (core fuzzer) — no external dependencies beyond the stdlib
+# Phase 2 (DL scheduler) — uncomment when activating dl/ modules
+# torch>=2.2.0
+# numpy>=1.26.0

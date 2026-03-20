@@ -1,0 +1,22 @@
+{
+  "format": "IPv4",
+  "fields": ["octet1", "octet2", "octet3", "octet4"],
+  "valid_examples": [
+    "0.0.0.0", "1.2.3.4", "127.0.0.1", "255.255.255.255",
+    "192.168.0.1", "10.0.0.1", "00.01.002.000"
+  ],
+  "semantic_rules": [
+    "octet_boundary", "leading_zeros", "extra_octets",
+    "missing_octets", "wrong_separator", "overflow_octet",
+    "negative_octet", "hex_octet", "empty_octet", "whitespace_injection"
+  ],
+  "havoc_operators": {
+    "bit_flip":        0.20,
+    "byte_substitute": 0.20,
+    "arithmetic":      0.15,
+    "splice":          0.10,
+    "delete_range":    0.10,
+    "insert_random":   0.10,
+    "interesting_byte": 0.15
+  }
+}

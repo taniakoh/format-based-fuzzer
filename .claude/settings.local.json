@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"C:\\\\Users\\\\tanta\\\\Downloads\\\\Code\\\\softwaretesting\\\\format-based-fuzzer/\"*.py)",
+      "Bash(python main.py ipv4 --time-budget 120 --havoc-iters 8 --seeds-n 80)",
+      "Bash(python -c \":*)",
+      "Bash(nvidia-smi)",
+      "Bash(python -c \"import torch; print\\(''torch:'', torch.__version__\\); print\\(''cuda available:'', torch.cuda.is_available\\(\\)\\); print\\(''device count:'', torch.cuda.device_count\\(\\)\\)\")",
+      "Bash(pip uninstall:*)"
+    ]
+  }
+}

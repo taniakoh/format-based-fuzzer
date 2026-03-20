@@ -1,0 +1,29 @@
+{
+  "format": "IPv6",
+  "fields": ["group1", "group2", "group3", "group4", "group5", "group6", "group7", "group8"],
+  "valid_examples": [
+    "2001:0db8:0000:0000:0000:ff00:0042:8329",
+    "2001:db8::1",
+    "::1",
+    "::",
+    "fe80::1",
+    "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+    "2001:db8::192.0.2.33",
+    "::192.0.2.1"
+  ],
+  "semantic_rules": [
+    "group_boundary", "double_colon_position", "mixed_notation",
+    "extra_groups", "missing_groups", "wrong_separator",
+    "overflow_group", "leading_zeros", "zone_id",
+    "multiple_double_colons", "empty_group"
+  ],
+  "havoc_operators": {
+    "bit_flip":        0.18,
+    "byte_substitute": 0.18,
+    "arithmetic":      0.12,
+    "splice":          0.12,
+    "delete_range":    0.10,
+    "insert_random":   0.10,
+    "interesting_byte": 0.20
+  }
+}
