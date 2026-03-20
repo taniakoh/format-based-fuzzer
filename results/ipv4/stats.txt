@@ -1,9 +1,9 @@
 Target          : ipv4
-Wall time       : 139.9s
-Total execs     : 4
-Behaviors seen  : 5
-Validity bugs   : 1
+Wall time       : 309.7s
+Total execs     : 18
+Behaviors seen  : 16
+Validity bugs   : 3
 Bonus bugs      : 0
-Invalidity count: 3
-Unique crashes  : 0
-Time-to-1st-bug : 37.2s
+Invalidity count: 14
+Unique crashes  : 1
+Time-to-1st-bug : 18.6s
