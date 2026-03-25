@@ -36,6 +36,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from fuzzer.oracle import OracleVerdict, evaluate_target_input
+
 _HERE = Path(__file__).parent.parent
 
 # Timeouts
@@ -117,6 +119,7 @@ class BugType:
     BONUS      = "bonus"
     CRASH      = "CRASH"
     TIMEOUT    = "TIMEOUT"
+    ORACLE_MISMATCH = "oracle_mismatch"
 
 
 @dataclass
@@ -128,6 +131,7 @@ class RunResult:
     stderr:        str
     exception_msg: str = ""
     traceback:     str = ""
+    oracle:        OracleVerdict | None = None
 
     @property
     def is_interesting(self) -> bool:
@@ -140,6 +144,16 @@ class RunResult:
     @property
     def is_crash(self) -> bool:
         return self.bug_type in (BugType.CRASH, BugType.TIMEOUT)
+
+    @property
+    def is_real_bug(self) -> bool:
+        return self.bug_type in (
+            BugType.VALIDITY,
+            BugType.BONUS,
+            BugType.CRASH,
+            BugType.TIMEOUT,
+            BugType.ORACLE_MISMATCH,
+        )
 
 
 def _parse_output(stdout: str, stderr: str) -> tuple[str, str, str]:
@@ -372,6 +386,7 @@ class Executor:
             exception_msg=exc_msg,
             traceback=tb,
         )
+        result = self._apply_oracle(result)
         return bytes(bitmap), result.is_crash, result
 
     # ── Shared binary runner (Linux-no-AFL and Windows) ───────────────────────
@@ -411,7 +426,7 @@ class Executor:
         if proc.returncode not in (0, 1) and bug_type == BugType.PASS:
             bug_type = BugType.CRASH
 
-        return RunResult(
+        result = RunResult(
             input_str=input_str,
             bug_type=bug_type,
             exit_code=proc.returncode,
@@ -420,3 +435,26 @@ class Executor:
             exception_msg=exc_msg,
             traceback=tb,
         )
+        return self._apply_oracle(result)
+
+    def _apply_oracle(self, result: RunResult) -> RunResult:
+        verdict = evaluate_target_input(self.target, result.input_str)
+        result.oracle = verdict
+        if not verdict.supported:
+            return result
+
+        if result.bug_type == BugType.PASS and verdict.expected_valid is False:
+            result.bug_type = BugType.ORACLE_MISMATCH
+            result.exception_msg = (
+                "Oracle expected rejection, but parser accepted the input "
+                f"({verdict.reason})"
+            )
+            return result
+
+        if result.bug_type == BugType.INVALIDITY and verdict.expected_valid is True:
+            result.bug_type = BugType.VALIDITY
+            detail = result.exception_msg or "Parser rejected oracle-valid input"
+            result.exception_msg = f"{detail} [oracle={verdict.reason}]"
+            return result
+
+        return result

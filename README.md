@@ -12,6 +12,7 @@ format-based-fuzzer/
 |  |- cidrize_format.json
 |  `- json_format.json
 |- corpus/                    # Optional hand-picked seed corpora
+|  |- cidrize_seeds.txt
 |  `- json_seeds.txt
 |- fuzzer/                    # Core fuzzer modules
 |  |- seed_generator.py       # Grammar-based valid seed generation
@@ -19,20 +20,23 @@ format-based-fuzzer/
 |  |  |- tier1_structure.py   # Structural mutations (pass-through today)
 |  |  |- tier2_semantic.py    # Semantic-span-guided string mutations
 |  |  `- tier3_havoc.py       # Stochastic byte-level mutations with optional hot-byte bias
-|  |- executor.py             # Wraps win-ipv4/ipv6-parser.exe
-|  `- json_atheris_harness.py # Atheris harness for the JSON decoder
+|  |- executor.py             # Wraps platform-specific parser binaries
+|  |- json_atheris_harness.py # Atheris harness for the JSON decoder
 |  |- coverage.py             # Behavior-based coverage tracking
 |  |- corpus.py               # Seed queue with priority selection
-|  `- scheduler.py            # Phase 1 static scheduler
-|- dl/                        # DL scheduler (Phase 2, requires torch)
+|  `- scheduler.py            # Static + payoff-tracking scheduler primitives
+|- dl/                        # Hybrid DL scheduler (optional, requires torch)
 |  |- surrogate.py            # Neural surrogate model + hybrid scheduler
 |  |- trainer.py              # Training loop + checkpoint save/load
 |  `- trustworthiness.py      # Confidence gate
 |- evaluation/
-|  `- collect_metrics.py      # Metrics collection and stats output
+|  |- collect_metrics.py      # Metrics collection and stats output
+|  `- plot_progress.py        # SVG plot generation from plot_data
 |- models/                    # Saved model checkpoints (created at runtime)
 |- results/                   # Fuzzing output (created at runtime)
 |- ipv4ipv6/                  # Target binaries
+|- cidrize-runner-main/       # Cidrize target binaries/wrappers
+|- json-decoder-main/         # Bundled JSON decoder target
 `- main.py                    # Entry point
 ```
 
@@ -40,7 +44,9 @@ format-based-fuzzer/
 
 ## Requirements
 
-**Python 3.11+** with no external packages required for the IPv4/IPv6 path.
+**Python 3.11+** is the primary supported setup for the binary targets.
+
+The repository also ships a `requirements.txt` with pinned optional dependencies used by the DL and JSON paths.
 
 ### Phase 2 (DL Scheduler) - optional
 
@@ -64,7 +70,7 @@ Verify CUDA is detected:
 python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
-> Without torch installed the IPv4/IPv6 targets run in Phase 1 mode with static operator weights.
+> Without torch installed, or when `--no-dl` is used, the binary targets run with the static/payoff-tracking scheduler only.
 
 ### JSON target requirements
 
@@ -91,6 +97,8 @@ python main.py <target> [options]
 | `--time-budget S` | int (default: `86400`) | Total fuzzing time in seconds |
 | `--seed RNG` | int (default: `42`) | RNG seed for reproducibility |
 | `--seeds-n N` | int (default: `100`) | Initial corpus size loaded at startup |
+| `--no-dl` | flag | Force the static scheduler even if torch is installed |
+| `--fresh-start` | flag | Clear `results/<target>/` and `models/<target>_surrogate.pt` before the run |
 
 ### Examples
 
@@ -110,14 +118,20 @@ python main.py cidrize --time-budget 3600
 # Fuzz the bundled JSON decoder with Atheris for 10 minutes
 python main.py json --time-budget 600
 
-# Fuzz both targets for 24 hours
+# Fuzz the binary parser targets (`ipv4`, `ipv6`, `cidrize`) sequentially
 python main.py all --time-budget 86400
 
 # Reproducible run
 python main.py ipv4 --time-budget 3600 --seed 123
+
+# Force static mode even if torch is installed
+python main.py ipv4 --time-budget 3600 --no-dl
+
+# Start from a clean slate
+python main.py ipv4 --time-budget 3600 --fresh-start
 ```
 
-> The target binaries are PyInstaller one-file bundles. Each execution takes about 20-30 seconds to unpack, so expect roughly 120 executions per hour.
+> On Windows, the IPv4/IPv6 parser bundles are PyInstaller one-file executables. Each execution takes about 20-30 seconds to unpack, so expect roughly 120 executions per hour there.
 
 > The `json` target is different: it launches an Atheris/libFuzzer campaign in `results/json/` and lets Atheris manage corpus growth and coverage guidance directly.
 
@@ -143,6 +157,12 @@ The runtime policy is hybrid rather than "DL on forever":
 - once the model has enough data, operator weights are blended with static priors instead of replacing them
 - if recent guided decisions underperform recent static decisions, guided influence is reduced automatically
 - seed prioritization also keeps a static baseline, and only adds a DL boost when guidance is currently trusted
+
+Current gating thresholds in code:
+
+- confidence threshold: `0.75`
+- warm-up samples: `20`
+- warm-up training rounds: `2`
 
 In practice the schedule is intentionally conservative:
 
@@ -222,8 +242,14 @@ All results are written to `results/<target>/`:
 | `bugs.jsonl` | One JSON record per interesting result (input, bug type, exception) |
 | `unique_bugs.json` | Deduplicated bug signatures with first-seen execution and one example input |
 | `crashes/crash_NNNNNN.txt` | One file per crashing input |
+| `queue/id_NNNNNN.txt` | Interesting inputs re-added to the corpus, with exec number and priority |
 | `plot_data` | CSV progress samples over time (`relative_time_sec`, `total_execs`, `behaviors_seen`, `corpus_size`, `unique_bugs`, `unique_crashes`) |
 | `progress.svg` | Optional chart generated from `plot_data` with `evaluation/plot_progress.py` |
+| `fuzzer_config` | JSON snapshot of the effective run configuration |
+| `fuzzer_stats` | Duplicate of the end-of-run text summary for AFL/Neuzz-style tooling |
+| `mutation_stats.json` | Learned payoff statistics for operators, fields, stages, and seed families |
+| `dl_training.jsonl` | One JSON record per periodic/final DL training event |
+| `dl_summary.json` | Final DL/checkpoint summary for the run |
 | `stats.txt` | Final summary printed and saved at the end of each run |
 
 For the `json` target specifically:
@@ -276,7 +302,7 @@ the first execution where it appeared and an example triggering input.
 
 ## DL Model Checkpoints
 
-When torch is installed the fuzzer trains a neural surrogate model on inputs that trigger new behaviors. Checkpoints are saved to `models/`:
+When torch is installed and DL is not disabled, the fuzzer trains a neural surrogate model on inputs that trigger new behaviors. Checkpoints are saved to `models/`:
 
 ```text
 models/ipv4_surrogate.pt

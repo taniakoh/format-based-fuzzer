@@ -1,90 +1,75 @@
-# Fuzzer Pipeline: Input → Output → Model
+# Fuzzer Pipeline: Input -> Output -> Model
 
-This document traces the full lifecycle of a single fuzzing iteration, from the very first seed to the trained DL surrogate.
+This document traces one binary-target fuzzing iteration in the current codebase and notes where the `json` target takes a different Atheris-managed path.
 
 ---
 
 ## Overview
 
+```text
+Seed generator / corpus file
+        |
+        v
+     Corpus.select()
+        |
+        v
+Tier 1 structure mutator (pass-through today)
+        |
+        v
+Scheduler.plan_mutation(seed)
+        |
+        +--> semantic_probability
+        +--> preferred_fields
+        +--> guided_ratio
+        +--> havoc operator weights
+        +--> optional hot bytes (DL only, confidence-gated)
+        |
+        v
+Tier 2 semantic mutator (sometimes applied)
+        |
+        v
+Tier 3 havoc mutator
+        |
+        v
+Executor.run(mutated)
+        |
+        v
+RunResult + behavior bitmap
+        |
+        v
+CoverageAnalyzer.is_interesting()
+        |
+        +--> not new: log bug/crash stats only
+        |
+        +--> new behavior:
+             add to corpus
+             write queue entry
+             append DL training sample
+             maybe train surrogate and save checkpoint
 ```
-[corpus/ipv4_seeds.txt]
-[IPv4SeedGenerator]
-        │
-        ▼
-   ┌─────────┐
-   │  Corpus │◄──────────────────────────────────────────┐
-   └────┬────┘                                           │
-        │ corpus.select()                                │ add(mutated, priority)
-        ▼                                                │
-  seed: bytes                                           [if new behavior]
-        │
-        ▼
-┌──────────────────────────────────────────────────────────────┐
-│                    MUTATION PIPELINE                         │
-│                                                              │
-│  Tier 1: StructureMutator      → pass-through (no-op)       │
-│  Tier 2: IPv4SemanticMutator   → IP-aware string mutations  │
-│          (50% probability)                                   │
-│  Tier 3: HavocMutator          → weighted byte-level chaos  │
-│          (weights from Scheduler)                            │
-└──────────────────┬───────────────────────────────────────────┘
-                   │ mutated: bytes
-                   ▼
-         ┌─────────────────┐
-         │    Executor     │  win-ipv4-parser.exe --ipstr <string>
-         └────────┬────────┘
-                  │
-          ┌───────┴───────┐
-          │               │
-          ▼               ▼
-     stdout/stderr    exit code
-          │
-          ▼
-    ┌───────────────┐
-    │  ParseOutput  │  → bug_type, exception_msg, traceback
-    └───────┬───────┘
-            │
-            ▼
-    ┌───────────────┐
-    │ BehaviorBitmap│  SHA-256(bug_type|exception_msg) → slot in 65536-byte map
-    └───────┬───────┘
-            │ bitmap: bytes
-            ▼
-    ┌──────────────────┐
-    │ CoverageAnalyzer │  is_interesting? (any new slot set?)
-    └───────┬──────────┘
-            │
-    ┌───────┴──────────────────┐
-    │                          │
-  [NEW]                    [NOT NEW]
-    │                          │
-    ▼                          ▼
-Add to Corpus          Check result.is_interesting
-Feed training buffer   Log to bugs.jsonl if bug
-    │
-    ▼
-[Every 10 new behaviors]
-    │
-    ▼
-  Train CoverageSurrogate
-  Save models/ipv4_surrogate.pt
-```
+
+For `json`, `main.py` switches to `_run_atheris_target(...)` instead of the loop below. Atheris then owns execution scheduling, coverage, and corpus growth inside `results/json/`.
 
 ---
 
 ## Stage 1: Seed Generation
 
-**Files:** `fuzzer/seed_generator.py`, `corpus/ipv4_seeds.txt`
+**Files:** `fuzzer/seed_generator.py`, `corpus/<target>_seeds.txt`, `config/<target>_format.json`
 
-The fuzzer starts by building an initial corpus before any mutations run.
+The initial corpus is built before mutation starts:
 
-**Two sources, merged in order:**
+1. If `corpus/<target>_seeds.txt` exists, those seeds are loaded first.
+2. The remaining slots up to `--seeds-n` are filled by the registered generator for that target.
+3. If no custom generator exists, `GenericSeedGenerator` falls back to `valid_examples` from the format config.
 
-1. **Hand-curated seeds** — loaded from `corpus/ipv4_seeds.txt` (or `ipv6_seeds.txt`). These are valid addresses written by the developer to cover known edge cases (e.g. `0.0.0.0`, `255.255.255.255`, `::1`).
+Current built-in generators:
 
-2. **Programmatic seeds** — `IPv4SeedGenerator.generate()` fills remaining slots up to `--seeds-n` (default 100). It picks octets from boundary values `[0, 1, 9, 10, 99, 100, 127, 128, 199, 200, 254, 255]` and occasionally pads them with leading zeros (e.g. `001.002.010.255`).
+- `ipv4`: boundary-heavy dotted quads with occasional leading zeros
+- `ipv6`: multiple structural templates, including compressed forms and mixed IPv4 suffixes
+- `cidrize`: IPv4, IPv6, CIDR, range, partial-range, and wildcard forms
+- `json`: generic fallback seeded from `config/json_format.json` and `corpus/json_seeds.txt`
 
-All seeds are stored as `bytes` (UTF-8 encoded strings). The corpus is a priority-weighted list; every seed starts with `priority=1.0`.
+All seeds are stored as `bytes`. Each one is inserted into the corpus with initial priority `1.0`.
 
 ---
 
@@ -92,240 +77,249 @@ All seeds are stored as `bytes` (UTF-8 encoded strings). The corpus is a priorit
 
 **File:** `fuzzer/corpus.py`
 
-Each iteration calls `corpus.select()`, which does a **weighted random draw** from all seeds using their priorities as weights. In Phase 1 all priorities are `1.0` (uniform). In Phase 2 the DL scheduler assigns higher priority to inputs the model predicts will find new coverage — so recently-interesting inputs get selected more often.
+Each iteration calls:
+
+```python
+seed = corpus.select(priority_fn=scheduler.get_seed_priority)
+```
+
+Selection is weighted by priority, not strict round-robin.
+
+- `StaticScheduler` still adapts priorities based on observed mutation payoff by seed family.
+- `DLScheduler` adds a confidence-and-blend-based boost on top of that static baseline.
+
+So even the "static" mode is no longer purely fixed weights everywhere; it has online payoff tracking, just without neural guidance.
 
 ---
 
-## Stage 3: Mutation Pipeline
+## Stage 3: Mutation Planning
 
-**Files:** `fuzzer/mutation/tier1_structure.py`, `tier2_semantic.py`, `tier3_havoc.py`
+**Files:** `fuzzer/scheduler.py`, `dl/surrogate.py`, `dl/trustworthiness.py`
 
-The selected seed passes through three mutation tiers in order. Each tier takes `bytes` and returns `bytes`.
+Before Tier 2 and Tier 3 run, the scheduler builds a mutation plan:
 
-### Tier 1 — Structure (`StructureMutator`)
+```python
+plan = scheduler.plan_mutation(seed)
+```
 
-A no-op pass-through for IP strings. The class exists so the main loop never has to branch — if a JSON target were added, this tier would add/remove/nest keys.
+The plan currently includes:
 
-### Tier 2 — Semantic (`IPv4SemanticMutator` / `IPv6SemanticMutator`)
+- `weights`: normalized havoc operator weights
+- `semantic_probability`: chance to apply Tier 2 on this iteration
+- `guided_ratio`: how often Tier 3 should spend effort on guided positions versus random ones
+- `preferred_fields`: up to three semantic fields worth biasing toward
+- `mode`: `static` or `guided`
+- `confidence`, `blend`, `reason`: scheduler diagnostics
 
-Applied with **50% probability** per iteration. Picks one operation at random from a protocol-aware list and applies it to the decoded address string.
+### Static mode
 
-IPv4 operations:
-- `octet_boundary` — replace an octet with `0`, `1`, `127`, `128`, `254`, or `255`
-- `leading_zeros` — pad an octet with `zfill(1–4)`, e.g. `1` → `001`
-- `extra_octets` — append 1–3 extra `.N` segments
-- `missing_octets` — drop one octet
-- `wrong_separator` — replace a `.` with `:`, `,`, `/`, space, `-`, or empty string
-- `overflow_octet` — replace an octet with `256`, `999`, `65535`, or `2^32`
-- `negative_octet` — replace an octet with `-1`, `-128`, `-255`
-- `hex_octet` — replace an octet with its `0x` hex form
-- `empty_octet` — replace an octet with `""`
-- `whitespace_injection` — insert a space/tab/newline/CR at a random position
+`StaticScheduler` uses `MutationPayoffTracker` only. It adapts operator weights, semantic probability, preferred fields, and seed priority from empirical success rates.
 
-IPv6 adds: `group_boundary`, `double_colon_position`, `mixed_notation` (IPv4 suffix), `extra/missing_groups`, `overflow_group`, `multiple_double_colons`, `zone_id` (`%eth0`).
+### Hybrid DL mode
 
-If any operation raises an exception, the original bytes are returned unchanged — the fuzzer itself never crashes due to a bad parse.
+`DLScheduler` starts from the same payoff tracker, then only enables guided mode when all of these are true:
 
-### Tier 3 — Havoc (`HavocMutator`)
+- model confidence passes the trust gate (`>= 0.75`)
+- at least 20 training samples have been seen
+- at least 2 training rounds have completed
+- recent guided outcomes are not underperforming recent static outcomes
 
-Runs `--havoc-iters` (default 8) stochastic byte-level operations in sequence. Each operation is chosen by weighted random draw:
-
-| Operator | Default Weight | What it does |
-|---|---|---|
-| `bit_flip` | 0.20 | XOR one random bit in one byte |
-| `byte_substitute` | 0.20 | Replace one byte with a random value 0–255 |
-| `arithmetic` | 0.15 | Add `±1` or `±35` to one byte (wraps at 255) |
-| `interesting_byte` | 0.15 | Set one byte to `0x00`, `0x01`, `0x2E` (`.`), `0x3A` (`:`), `0x7F`, `0x80`, or `0xFF` |
-| `splice` | 0.10 | Swap the two halves of the buffer |
-| `delete_range` | 0.10 | Delete 1–8 bytes starting at a random position |
-| `insert_random` | 0.10 | Insert 1–8 random bytes at a random position |
-
-Weights come from `config/<target>_format.json` in Phase 1, or from `DLScheduler.get_operator_weights()` in Phase 2.
+When those checks fail, the scheduler returns a static plan with a concrete fallback reason such as `low_confidence` or `undertrained_rounds`.
 
 ---
 
-## Stage 4: Execution
+## Stage 4: Tiered Mutation
+
+**Files:** `fuzzer/mutation/tier1_structure.py`, `fuzzer/mutation/tier2_semantic.py`, `fuzzer/mutation/tier3_havoc.py`
+
+The selected seed then flows through three tiers.
+
+### Tier 1: Structure
+
+`StructureMutator` is currently a pass-through layer. It exists to keep the pipeline shape stable if future targets need coarse structural edits before semantic or havoc mutations.
+
+### Tier 2: Semantic
+
+Tier 2 runs with probability `plan["semantic_probability"]`.
+
+The current target mutators are:
+
+- `ipv4`
+- `ipv6`
+- `cidrize`
+- `json`
+
+Each semantic mutator:
+
+- chooses one operation from the target's configured `semantic_rules`
+- can use `hot_bytes` from the DL surrogate
+- can bias toward `preferred_fields` from the scheduler
+- records trace metadata so the scheduler can learn which operations, fields, and guidance modes are paying off
+
+The core abstraction is `SemanticSpan`, which maps byte positions back to meaningful regions such as IPv4 octets, IPv6 groups, cidrize tokens, or JSON literals/punctuation.
+
+### Tier 3: Havoc
+
+Tier 3 always runs. `HavocMutator` applies `--havoc-iters` stochastic byte-level edits using the weights chosen by the scheduler.
+
+The default operator set is:
+
+- `bit_flip`
+- `byte_substitute`
+- `arithmetic`
+- `splice`
+- `delete_range`
+- `insert_random`
+- `interesting_byte`
+
+If guided hot bytes or preferred semantic fields are available, Tier 3 biases mutation positions toward them according to `guided_ratio`.
+
+---
+
+## Stage 5: Execution
 
 **File:** `fuzzer/executor.py`
 
-`Executor.run(mutated: bytes)` does three things:
+`Executor(target)` picks the best runtime mode for the current platform:
 
-1. **Decode** the bytes to a printable ASCII string (`latin-1` → backslash-escape non-ASCII).
-2. **Spawn the binary** as a subprocess:
-   ```
-   win-ipv4-parser.exe --ipstr <string>
-   ```
-   stdin is closed (`DEVNULL`). Timeout is 60 seconds (PyInstaller bundles take 20–30s to unpack, so expect ~120 executions/hour).
-3. **Parse stdout + stderr** with regex to extract:
-   - `bug_type` — from the parser's `Final bug count:` line
-   - `exception_msg` — the exception message text
-   - `traceback` — the full traceback block (if any)
+- Linux + registered native binary: Linux native execution with a short timeout
+- otherwise: behavior-hash execution against the configured parser binary
+- JSON does not use `Executor`; it goes through the Atheris harness path in `main.py`
 
-**Bug classification logic:**
-- `"No bugs found"` in output → `PASS`
-- `Final bug count:` present → `validity`, `invalidity`, or `bonus` from the dict key
-- Traceback present but no bug count → `bonus`
-- Non-zero exit code and no other classification → `CRASH`
-- Process killed by timeout → `TIMEOUT`
+Important implementation details for the binary targets:
 
----
+- `stdin=subprocess.DEVNULL` is always used
+- Windows parser bundles get a 60-second timeout because of PyInstaller unpack overhead
+- Linux native binaries use a 5-second timeout
+- stdout/stderr are parsed into a `RunResult` containing `bug_type`, `exception_msg`, traceback text, and exit code
 
-## Stage 5: Behavior Bitmap
+Bug classification is derived from parser output plus process state:
 
-**File:** `fuzzer/executor.py` (`_result_to_bitmap`)
-
-Because the target binaries are opaque (no AFL instrumentation), real edge coverage is unavailable. Instead:
-
-1. A 65536-byte bitmap is initialized to all zeros.
-2. If the result is `PASS`, the bitmap stays all zeros (no new information).
-3. Otherwise, the string `"<bug_type>|<exception_msg[:128]>"` is SHA-256 hashed. The first two bytes of the digest are used as a 16-bit index: `bitmap[pos] = 1`.
-4. For `CRASH`, `TIMEOUT`, and `validity` bugs, a **second slot** is set using digest bytes 2–3 — so these are always flagged as interesting even if the same exception was seen before.
-
-This gives each unique `(bug_type, error message)` pair a stable, reproducible position in the bitmap.
+- `PASS`
+- `validity`
+- `invalidity`
+- `bonus`
+- `CRASH`
+- `TIMEOUT`
 
 ---
 
-## Stage 6: Coverage Analysis
+## Stage 6: Behavior Bitmap and Interestingness
 
-**File:** `fuzzer/coverage.py`
+**Files:** `fuzzer/executor.py`, `fuzzer/coverage.py`
 
-`CoverageAnalyzer` maintains a single global 65536-byte bitmap that accumulates across all iterations.
+For non-instrumented runs, coverage is approximated with a 65,536-byte bitmap:
 
-`is_interesting(bitmap)` ORs the new bitmap against the global one. If **any slot transitions from 0 → 1**, the input is "interesting" — it triggered a parser behavior never seen before.
+1. `PASS` returns an all-zero bitmap.
+2. Otherwise, `"<bug_type>|<exception_msg[:128]>"` is SHA-256 hashed into a stable slot.
+3. `CRASH`, `TIMEOUT`, and `validity` set a second slot as well so they remain interesting even when repeated.
 
-The `edge_count` counter increments for every newly-set slot. This is what gets reported as `behaviors_covered` in the stats.
+`CoverageAnalyzer.is_interesting(bitmap)` merges that bitmap into the global run bitmap and returns `True` if any slot flipped from `0` to `1`.
 
----
-
-## Stage 7: Corpus Feedback and Output
-
-**Files:** `fuzzer/corpus.py`, `evaluation/collect_metrics.py`
-
-### If the input triggered new coverage:
-- It is added to the corpus: `corpus.add(mutated, priority=scheduler.get_seed_priority(mutated))`
-- The `(mutated, [bitmap_positions_set])` pair is appended to the **training buffer**
-- `behaviors_since_last_train` increments
-
-### For every execution (new coverage or not):
-- `MetricsCollector.record_execution()` is called
-- If `bug_type != PASS`, a JSON record is appended to `results/<target>/bugs.jsonl`
-- If it's a crash, the input is written to `results/<target>/crashes/crash_NNNNNN.txt`
-
-### At shutdown:
-- `metrics.finalize()` writes `results/<target>/stats.txt`:
-  ```
-  Target          : ipv4
-  Wall time       : 3600.0s
-  Total execs     : 120
-  Behaviors seen  : 47
-  Validity bugs   : 3
-  Bonus bugs      : 1
-  Invalidity count: 38
-  Unique crashes  : 2
-  Time-to-1st-bug : 22.4s
-  ```
+That count is reported as `Behaviors seen`.
 
 ---
 
-## Stage 8: DL Model Training (Phase 2 only)
+## Stage 7: Feedback, Logging, and Corpus Growth
 
-**Files:** `dl/surrogate.py`, `dl/trainer.py`, `dl/trustworthiness.py`
+**Files:** `fuzzer/corpus.py`, `evaluation/collect_metrics.py`, `main.py`
 
-This stage only activates when `torch` is installed. If not, `StaticScheduler` is used and stages 8–9 are skipped entirely.
+Every execution is recorded:
 
-### Training trigger
+- `bugs.jsonl` gets one entry for every non-`PASS` result
+- `unique_bugs.json` tracks distinct `(bug_type, exception_msg)` signatures
+- `crashes/` stores unique crash inputs
+- `plot_data` appends a CSV progress point
 
-Every time `behaviors_since_last_train >= 10` (i.e., 10 new coverage-triggering inputs have been found), `trainer.train()` is called on the accumulated buffer.
+When a new behavior is found:
 
-### What the model learns
+- the mutated input is added back into the corpus
+- a queue artifact is written to `results/<target>/queue/id_XXXXXX.txt`
+- `behaviors_covered` is updated
+- the input and active bitmap positions are appended to the DL training buffer
 
-`CoverageSurrogate` is a small MLP:
+Additional run artifacts written by the current implementation:
 
-```
-Input: seed bytes padded/truncated to 256 bytes
-  → Embedding layer (256 vocab, dim 8)  →  shape (256, 8)
-  → Flatten  →  shape (2048,)
-  → Linear(2048 → 512) + ReLU
-  → Linear(512 → 256) + ReLU
-  → Two heads:
-      coverage_head:   Linear(256 → 128)  + sigmoid  → 128-dim coverage prediction
-      confidence_head: Linear(256 → 1)    + sigmoid  → single confidence score
-```
-
-The **training target** is a 128-dim binary vector. For each `(seed, bitmap_positions)` pair in the buffer, any bitmap position `< 128` is set to `1.0` in the target vector. The model trains to predict which of the 128 coverage slots a given input will activate.
-
-Loss function: Binary Cross Entropy (`BCELoss`). Optimizer: Adam, `lr=1e-3`. Default: 5 epochs per training call.
-
-### Checkpoint persistence
-
-After every training run the model is saved:
-```
-models/ipv4_surrogate.pt   ← torch.save(model.state_dict(), path)
-```
-
-On the next fuzzing run it is loaded automatically:
-```
-models/ipv4_surrogate.pt   → torch.load(path, map_location=device)
-```
-
-Delete the `.pt` file to start training from scratch.
+- `fuzzer_config`
+- `fuzzer_stats`
+- `mutation_stats.json`
+- `dl_training.jsonl`
+- `dl_summary.json`
 
 ---
 
-## Stage 9: DL Scheduler Feedback (Phase 2 only)
+## Stage 8: DL Training and Checkpoints
 
-**File:** `dl/surrogate.py` (`DLScheduler`)
+**Files:** `dl/surrogate.py`, `dl/trainer.py`
 
-Once the model exists, it influences the fuzzer in two ways each iteration:
+This stage only runs when torch is available and DL has not been disabled with `--no-dl`.
 
-### 1. Operator weights (`get_operator_weights`)
+Training happens:
 
-Before Tier 3 runs, the scheduler encodes the current seed and runs a forward pass. If `confidence >= 0.75` (the trustworthiness threshold in `dl/trustworthiness.py`), it returns **uniform weights** across all operators (each operator gets `1/7 ≈ 0.143`). Otherwise it falls back to the static weights from the JSON config.
+- periodically, every `TRAIN_EVERY = 10` newly discovered behaviors
+- once more at shutdown if the training buffer is non-empty
 
-> The current "learned weights" implementation uses uniform distribution as a placeholder — the model's learned representation influences **seed priority** and **hot byte identification**, not operator selection directly.
+### Model
 
-### 2. Seed priority (`get_seed_priority`)
+`CoverageSurrogate` uses:
 
-When an interesting input is added to the corpus, `DLScheduler.get_seed_priority(seed)` runs a forward pass and returns the confidence score as the priority. Higher-confidence seeds (those the model believes are near new coverage) are selected more often by `corpus.select()`.
+- byte embedding (`256 -> 8`)
+- MLP encoder (`2048 -> 512 -> 256`)
+- `coverage_head`: 128-dimensional sigmoid output
+- `confidence_head`: 1-dimensional sigmoid output
 
-### 3. Hot byte identification (`get_field_importance`)
+### Targets and loss
 
-`identify_hot_bytes()` computes gradients of the predicted coverage with respect to the embedding layer inputs. Byte positions with the highest gradient magnitude are returned — these are the byte positions most likely to change coverage if mutated. (Available but not yet wired into the mutation pipeline directly.)
+The surrogate is trained on:
+
+- a 128-dimensional binary coverage target built from observed bitmap positions `< 128`
+- a learned confidence target derived from top-k overlap between predicted and true coverage
+
+Training combines:
+
+- coverage BCE loss
+- a lightly weighted confidence regression loss
+
+### Persistence
+
+Checkpoints are saved to:
+
+```text
+models/<target>_surrogate.pt
+```
+
+Checkpoint metadata also stores scheduler runtime state such as:
+
+- `training_samples_seen`
+- `training_rounds`
+- `last_training_loss`
+
+That metadata is restored on the next run so the hybrid scheduler does not forget its warm-up state.
 
 ---
 
-## Full Data Flow Summary
+## JSON Target Divergence
 
-```
-corpus/ipv4_seeds.txt  ──┐
-IPv4SeedGenerator        ├──► Corpus (priority queue)
-                         │         │
-                         │    corpus.select()  ◄── DLScheduler.get_seed_priority()
-                         │         │
-                         │    Tier 1 (pass-through)
-                         │         │
-                         │    Tier 2 (50%): semantic string mutations
-                         │         │
-                         │    Tier 3: havoc   ◄── DLScheduler.get_operator_weights()
-                         │         │                (or StaticScheduler)
-                         │         │
-                         │    win-ipv4-parser.exe --ipstr <mutated>
-                         │         │
-                         │    stdout/stderr → bug_type, exception_msg
-                         │         │
-                         │    SHA-256 hash → behavior bitmap slot
-                         │         │
-                         │    CoverageAnalyzer: new slot? ──► NO → log only
-                         │         │ YES
-                         │         ├──► corpus.add(mutated, priority)  ──┘ (loop back)
-                         │         ├──► training_buffer.append((seed, positions))
-                         │         │
-                         │    every 10 new behaviors:
-                         │         ├──► train(CoverageSurrogate, training_buffer)
-                         │         └──► save models/ipv4_surrogate.pt
-                         │
-                    [next run]: load models/ipv4_surrogate.pt → DLScheduler
-```
+**Files:** `main.py`, `fuzzer/json_atheris_harness.py`
+
+The `json` target does not use the binary-target loop above.
+
+Instead, `main.py`:
+
+1. generates a seed corpus on disk in `results/json/atheris_corpus/`
+2. writes `results/json/fuzzer_config`
+3. launches the Atheris harness in a subprocess
+4. lets Atheris/libFuzzer manage coverage, scheduling, and crash artifacts
+
+The main outputs for that path are:
+
+- `atheris.log`
+- `atheris_corpus/`
+- `crashes/`
+- `stats.txt`
+- `fuzzer_stats`
+
+Because Atheris owns the execution loop, the DL scheduler, behavior bitmap, and corpus feedback path described above apply only to the binary targets.
 
 ---
 
@@ -333,11 +327,13 @@ IPv4SeedGenerator        ├──► Corpus (priority queue)
 
 | Constant | Value | Where |
 |---|---|---|
-| Bitmap size | 65,536 bytes | `executor.py`, `coverage.py` |
-| Max input length (model) | 256 bytes | `surrogate.py:CoverageSurrogate.MAX_LEN` |
-| Coverage representation | 128 dimensions | `surrogate.py:CoverageSurrogate.COV_DIM` |
-| Train trigger | every 10 new behaviors | `main.py:TRAIN_EVERY` |
-| Training epochs per call | 5 | `trainer.py:train()` |
-| Confidence threshold | 0.75 | `trustworthiness.py` |
-| Execution timeout | 60 seconds | `executor.py:TIMEOUT_SECONDS` |
-| Default havoc iterations | 8 per execution | `main.py` / `--havoc-iters` |
+| Behavior bitmap size | 65,536 bytes | `fuzzer/executor.py`, `fuzzer/coverage.py` |
+| Model max input length | 256 bytes | `dl/surrogate.py` |
+| Coverage output dimension | 128 | `dl/surrogate.py` |
+| Periodic train trigger | 10 new behaviors | `main.py` |
+| Confidence threshold | 0.75 | `dl/trustworthiness.py` |
+| DL warm-up samples | 20 | `dl/surrogate.py` |
+| DL warm-up rounds | 2 | `dl/surrogate.py` |
+| Windows timeout | 60 s | `fuzzer/executor.py` |
+| Linux timeout | 5 s | `fuzzer/executor.py` |
+| Default havoc iterations | 8 | `main.py` |

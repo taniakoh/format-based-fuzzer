@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import math
 import os
 import random
 import sys
@@ -89,12 +91,51 @@ def custom_mutator(data: bytes, max_size: int, seed: int) -> bytes:
     return _trim(current, max_size)
 
 
+def _safe_json_loads(data: bytes):
+    try:
+        return True, json.loads(data), None
+    except (json.JSONDecodeError, UnicodeDecodeError, ValueError, TypeError) as exc:
+        return False, None, exc
+
+
+def _normalize_json_value(value):
+    if isinstance(value, dict):
+        return {str(key): _normalize_json_value(subvalue) for key, subvalue in value.items()}
+    if isinstance(value, list):
+        return [_normalize_json_value(item) for item in value]
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "NaN"
+        if math.isinf(value):
+            return "Infinity" if value > 0 else "-Infinity"
+    return value
+
+
 @atheris.instrument_func
 def test_one_input(data: bytes) -> None:
+    ref_ok, ref_value, ref_exc = _safe_json_loads(data)
+
     try:
-        loads(data)
-    except (JSONDecodeError, InvalidityBug, UnicodeDecodeError, ValueError):
+        candidate_value = loads(data)
+    except (JSONDecodeError, InvalidityBug, UnicodeDecodeError, ValueError) as exc:
+        if ref_ok:
+            raise AssertionError(
+                f"Oracle mismatch: stdlib accepted input, buggy_json rejected it: {exc}"
+            ) from exc
         return
+
+    if not ref_ok:
+        raise AssertionError(
+            f"Oracle mismatch: stdlib rejected input, buggy_json accepted it: {ref_exc}"
+        )
+
+    normalized_candidate = _normalize_json_value(candidate_value)
+    normalized_reference = _normalize_json_value(ref_value)
+    if normalized_candidate != normalized_reference:
+        raise AssertionError(
+            "Oracle mismatch: decoded values differ between buggy_json and stdlib "
+            f"(buggy_json={normalized_candidate!r}, stdlib={normalized_reference!r})"
+        )
 
 
 def main() -> None:

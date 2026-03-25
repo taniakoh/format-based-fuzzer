@@ -223,3 +223,37 @@ Key files changed:
 - `dl/trainer.py`
 - `dl/surrogate.py`
 - `dl/trustworthiness.py`
+
+
+## 2026-03-26
+
+### Add oracle-based parser classification
+Improvements:
+- Added lightweight IPv4, IPv6, and cidrize input oracles so the executor can compare parser behavior against expected validity.
+- Reclassified oracle-detected false accepts as `oracle_mismatch` and upgraded false rejects from `invalidity` to `validity` when the oracle says the input is valid.
+- Stopped counting expected `invalidity` results as unique bugs while preserving them as a separate metric.
+
+Reasons:
+- Keeps evaluation results aligned with real bugs instead of treating normal invalid-input rejection as bug discovery.
+- Makes it possible to surface acceptance/rejection mismatches that the target binary reports as plain success.
+
+Key files changed:
+- `fuzzer/oracle.py`
+- `fuzzer/executor.py`
+- `evaluation/collect_metrics.py`
+
+## 2026-03-26
+
+### Add JSON stdlib oracle
+Improvements:
+- Added a JSON oracle to the Atheris harness using Python's standard `json.loads` as the reference parser.
+- Reported mismatches where the custom decoder rejects JSON accepted by the stdlib, accepts JSON rejected by the stdlib, or decodes to a different value.
+- Normalized special float values before comparison so semantic comparisons stay stable.
+
+Reasons:
+- Gives the JSON target the same kind of correctness oracle as the parser binaries instead of relying only on crashes or seeded exceptions.
+- Lets Atheris surface semantic and acceptance/rejection bugs directly during fuzzing.
+
+Key files changed:
+- `fuzzer/json_atheris_harness.py`
+
