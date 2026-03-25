@@ -11,17 +11,87 @@ Mutation categories:
         wrong separators, overflowed octets, hex notation, whitespace injection
   IPv6: group boundary values, double-colon position, mixed IPv4 notation,
         extra/missing groups, multiple double-colons, zone-ID injection
+
+Adding a new format
+-------------------
+1. Subclass SemanticMutator and implement every operation as ``_<name>``.
+2. Decorate the class with ``@SemanticMutator.register("<format_name>")``.
+3. Add a ``config/<format_name>_format.json`` with a ``semantic_rules`` list.
+   The factory will read that list and pass it to the mutator automatically.
+No changes to existing code or main.py are required.
 """
 
+import abc
 import random
 import re
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Abstract base + registry
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SemanticMutator(abc.ABC):
+    """Contract for all format-specific semantic mutators."""
+
+    _registry: dict[str, type["SemanticMutator"]] = {}
+
+    @classmethod
+    def register(cls, format_name: str):
+        """Class decorator: register a subclass under *format_name* (case-insensitive)."""
+        def decorator(subclass: type["SemanticMutator"]) -> type["SemanticMutator"]:
+            cls._registry[format_name.lower()] = subclass
+            return subclass
+        return decorator
+
+    def __init__(self, operations: list[str] | None = None) -> None:
+        # Prefer explicitly-supplied list (e.g. from config JSON); fall back to
+        # the class-level OPERATIONS constant so subclasses still work standalone.
+        self.operations: list[str] = operations or list(getattr(self, "OPERATIONS", []))
+
+    @abc.abstractmethod
+    def mutate(self, data: bytes) -> bytes:
+        """Return a semantically mutated copy of *data*."""
+
+
+class PassThroughMutator(SemanticMutator):
+    """Fallback mutator for unrecognised formats — returns data unchanged."""
+
+    def mutate(self, data: bytes) -> bytes:
+        return data
+
+
+def get_mutator(format_name: str, fmt_config: dict | None = None) -> SemanticMutator:
+    """Return the registered SemanticMutator for *format_name*.
+
+    If *fmt_config* contains a ``semantic_rules`` list it is used as the active
+    operation set; otherwise the subclass default (OPERATIONS) is kept.
+
+    If no mutator is registered for *format_name* a PassThroughMutator is
+    returned so the pipeline keeps running without semantic mutations.
+    """
+    key = format_name.lower()
+    cls = SemanticMutator._registry.get(key)
+    if cls is None:
+        registered = sorted(SemanticMutator._registry)
+        print(
+            f"[tier2] No semantic mutator for '{format_name}' "
+            f"(registered: {registered}) — using pass-through."
+        )
+        return PassThroughMutator()
+    operations = None
+    if fmt_config and "semantic_rules" in fmt_config:
+        operations = list(fmt_config["semantic_rules"])
+    return cls(operations=operations)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  IPv4
 # ─────────────────────────────────────────────────────────────────────────────
 
-class IPv4SemanticMutator:
+@SemanticMutator.register("ipv4")
+class IPv4SemanticMutator(SemanticMutator):
+    # Default operation list — overridden by config["semantic_rules"] when the
+    # mutator is created via get_mutator().
     OPERATIONS = [
         "octet_boundary", "leading_zeros", "extra_octets",
         "missing_octets", "wrong_separator", "overflow_octet",
@@ -30,7 +100,7 @@ class IPv4SemanticMutator:
     ]
 
     def mutate(self, data: bytes) -> bytes:
-        op = random.choice(self.OPERATIONS)
+        op = random.choice(self.operations)
         try:
             return getattr(self, f"_{op}")(data)
         except Exception:
@@ -142,7 +212,8 @@ class IPv4SemanticMutator:
 #  IPv6
 # ─────────────────────────────────────────────────────────────────────────────
 
-class IPv6SemanticMutator:
+@SemanticMutator.register("ipv6")
+class IPv6SemanticMutator(SemanticMutator):
     OPERATIONS = [
         "group_boundary", "double_colon_position", "mixed_notation",
         "extra_groups", "missing_groups", "wrong_separator",
@@ -151,7 +222,7 @@ class IPv6SemanticMutator:
     ]
 
     def mutate(self, data: bytes) -> bytes:
-        op = random.choice(self.OPERATIONS)
+        op = random.choice(self.operations)
         try:
             return getattr(self, f"_{op}")(data)
         except Exception:
@@ -160,7 +231,6 @@ class IPv6SemanticMutator:
     def _group_boundary(self, data: bytes) -> bytes:
         """Replace one hex group with a boundary value."""
         s = data.decode("latin-1", errors="replace")
-        # Operate only on the colon-separated groups (ignore :: for simplicity)
         parts = s.split(":")
         idx = random.randint(0, len(parts) - 1)
         parts[idx] = random.choice(["0", "1", "ffff", "8000", "7fff", "0000"])
@@ -169,7 +239,6 @@ class IPv6SemanticMutator:
     def _double_colon_position(self, data: bytes) -> bytes:
         """Move or add a :: to a different position."""
         s = data.decode("latin-1", errors="replace")
-        # Remove existing ::
         s_clean = s.replace("::", ":")
         parts = [p for p in s_clean.split(":") if p]
         if len(parts) < 2:
@@ -249,3 +318,15 @@ class IPv6SemanticMutator:
         ws = random.choice([" ", "\t", "\n", "\r"])
         pos = random.randint(0, len(s))
         return (s[:pos] + ws + s[pos:]).encode()
+
+    def _leading_zeros(self, data: bytes) -> bytes:
+        """Pad one hex group with leading zeros."""
+        s = data.decode("latin-1", errors="replace")
+        parts = s.split(":")
+        idx = random.randint(0, len(parts) - 1)
+        try:
+            val = int(parts[idx], 16)
+            parts[idx] = format(val, "04x").zfill(random.randint(4, 8))
+        except ValueError:
+            pass
+        return ":".join(parts).encode()

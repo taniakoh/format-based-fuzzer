@@ -46,15 +46,32 @@ BITMAP_SIZE = 65536
 
 # ── Binary registry ───────────────────────────────────────────────────────────
 
-_WINDOWS_BINARIES = {
+_WINDOWS_BINARIES: dict[str, Path] = {
     "ipv4": _HERE / "ipv4ipv6" / "win-ipv4-parser.exe",
     "ipv6": _HERE / "ipv4ipv6" / "win-ipv6-parser.exe",
 }
 
-_LINUX_BINARIES = {
+_LINUX_BINARIES: dict[str, Path] = {
     "ipv4": _HERE / "ipv4ipv6" / "linux-ipv4-parser",
     "ipv6": _HERE / "ipv4ipv6" / "linux-ipv6-parser",
 }
+
+
+def register_binary(
+    target: str,
+    windows: str | Path | None = None,
+    linux: str | Path | None = None,
+) -> None:
+    """Register binary paths for a new target format.
+
+    Call this before constructing an ``Executor`` for the target, or supply
+    ``binary_windows`` / ``binary_linux`` keys in the format config JSON and
+    let ``main.py`` call this automatically.
+    """
+    if windows is not None:
+        _WINDOWS_BINARIES[target.lower()] = Path(windows)
+    if linux is not None:
+        _LINUX_BINARIES[target.lower()] = Path(linux)
 
 # ── Platform helpers ──────────────────────────────────────────────────────────
 
@@ -199,7 +216,13 @@ class Executor:
         win_bin   = _WINDOWS_BINARIES.get(target)
 
         if linux_bin is None and win_bin is None:
-            raise ValueError(f"Unknown target '{target}'. Choose 'ipv4' or 'ipv6'.")
+            registered = sorted(set(_WINDOWS_BINARIES) | set(_LINUX_BINARIES))
+            raise ValueError(
+                f"No binary registered for target '{target}'. "
+                f"Registered targets: {registered}. "
+                f"Call register_binary('{target}', windows=..., linux=...) "
+                f"or add 'binary_windows'/'binary_linux' to config/{target}_format.json."
+            )
 
         afl = _afl_showmap()
 

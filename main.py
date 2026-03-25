@@ -31,13 +31,13 @@ import time
 
 from fuzzer.corpus import Corpus
 from fuzzer.coverage import CoverageAnalyzer
-from fuzzer.executor import Executor
+from fuzzer.executor import Executor, register_binary
 from fuzzer.format_loader import load_format
 from fuzzer.mutation.tier1_structure import StructureMutator
-from fuzzer.mutation.tier2_semantic import IPv4SemanticMutator, IPv6SemanticMutator
+from fuzzer.mutation.tier2_semantic import get_mutator
 from fuzzer.mutation.tier3_havoc import HavocMutator
 from fuzzer.scheduler import StaticScheduler
-from fuzzer.seed_generator import IPv4SeedGenerator, IPv6SeedGenerator
+from fuzzer.seed_generator import get_seed_generator
 from evaluation.collect_metrics import MetricsCollector
 
 # Train the surrogate every N new behaviors discovered.
@@ -62,8 +62,16 @@ def fuzz(
     # ── Load format config ────────────────────────────────────────────────────
     fmt = load_format(target)
 
+    # ── Register binary paths from config if provided ─────────────────────────
+    if fmt.get("binary_windows") or fmt.get("binary_linux"):
+        register_binary(
+            target,
+            windows=fmt.get("binary_windows"),
+            linux=fmt.get("binary_linux"),
+        )
+
     # ── Seed generation ───────────────────────────────────────────────────────
-    generator = IPv4SeedGenerator() if target == "ipv4" else IPv6SeedGenerator()
+    generator = get_seed_generator(target, fmt)
     corpus = Corpus()
     for seed in generator.generate_corpus(n=seeds_n):
         corpus.add(seed, priority=1.0)
@@ -71,7 +79,7 @@ def fuzz(
 
     # ── Mutation engine ───────────────────────────────────────────────────────
     tier1 = StructureMutator()  # pass-through for IP strings
-    tier2 = IPv4SemanticMutator() if target == "ipv4" else IPv6SemanticMutator()
+    tier2 = get_mutator(target, fmt)
 
     # ── Scheduler: DLScheduler if torch available, else StaticScheduler ───────
     model = None
@@ -177,8 +185,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Hybrid Coverage-Guided IP Fuzzer")
     parser.add_argument(
         "target",
-        choices=["ipv4", "ipv6", "all"],
-        help="Parser to fuzz",
+        help="Parser to fuzz (e.g. ipv4, ipv6, or any registered format; 'all' runs ipv4+ipv6)",
     )
     parser.add_argument("--havoc-iters", type=int, default=8,
                         help="Havoc mutations per execution (default: 8)")
