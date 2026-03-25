@@ -1,0 +1,49 @@
+{
+  "format": "Cidrize",
+  "fields": [
+    "address",
+    "cidr_prefix",
+    "range_start",
+    "range_end",
+    "wildcard",
+    "separator"
+  ],
+  "valid_examples": [
+    "1.2.3.4",
+    "192.0.2.64/26",
+    "192.0.2.80-192.0.2.85",
+    "192.0.2.170-175",
+    "192.0.2.8[0-5]",
+    "192.0.2.[5678]",
+    "2001:db8::1",
+    "2001:db8::/64",
+    "2001:db8::1-2001:db8::5",
+    "::ffff:192.0.2.33/128"
+  ],
+  "semantic_rules": [
+    "address_boundary",
+    "cidr_prefix",
+    "cidr_missing_prefix",
+    "range_flip",
+    "partial_range_end",
+    "wildcard_expand",
+    "wildcard_damage",
+    "separator_confusion",
+    "family_mix",
+    "token_duplication",
+    "whitespace_injection"
+  ],
+  "havoc_operators": {
+    "bit_flip": 0.18,
+    "byte_substitute": 0.18,
+    "arithmetic": 0.14,
+    "splice": 0.12,
+    "delete_range": 0.12,
+    "insert_random": 0.10,
+    "interesting_byte": 0.16
+  },
+  "binary_windows": "cidrize-runner-main/bin/win-cidrize-runner.exe",
+  "binary_linux": "cidrize-runner-main/bin/linux-cidrize-runner",
+  "binary_windows_args": ["--func", "cidrize"],
+  "binary_linux_args": ["--func", "cidrize"]
+}

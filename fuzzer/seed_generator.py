@@ -176,3 +176,71 @@ class IPv6SeedGenerator(SeedGenerator):
             parts = addr.rsplit(":", 1)
             addr = parts[0] + ":" + ipv4_suffix
         return addr.encode()
+
+
+@SeedGenerator.register("cidrize")
+class CidrizeSeedGenerator(SeedGenerator):
+    """Generates valid mixed-notation IP strings for the cidrize target."""
+
+    IPV4_OCTETS = [0, 1, 2, 8, 10, 24, 26, 64, 80, 85, 127, 170, 175, 192, 255]
+    IPV6_GROUPS = ["0", "1", "2", "5", "8", "64", "db8", "ffff", "abcd", "dead"]
+    IPV4_PREFIXES = [0, 8, 16, 24, 26, 31, 32]
+    IPV6_PREFIXES = [0, 32, 48, 64, 96, 112, 128]
+
+    def _ipv4(self) -> str:
+        return ".".join(str(random.choice(self.IPV4_OCTETS)) for _ in range(4))
+
+    def _ipv6(self) -> str:
+        templates = [
+            "{g}:{g}:{g}:{g}:{g}:{g}:{g}:{g}",
+            "{g}::{g}",
+            "::{g}",
+            "{g}::{g}:{g}",
+            "::ffff:{ipv4}",
+        ]
+        template = random.choice(templates)
+        return template.format(g=random.choice(self.IPV6_GROUPS), ipv4=self._ipv4())
+
+    def generate(self) -> bytes:
+        choice = random.choice(
+            [
+                "ipv4",
+                "ipv4_cidr",
+                "ipv4_range",
+                "ipv4_partial_range",
+                "ipv4_wildcard",
+                "ipv6",
+                "ipv6_cidr",
+                "ipv6_range",
+            ]
+        )
+        if choice == "ipv4":
+            value = self._ipv4()
+        elif choice == "ipv4_cidr":
+            value = f"{self._ipv4()}/{random.choice(self.IPV4_PREFIXES)}"
+        elif choice == "ipv4_range":
+            start = self._ipv4()
+            end = self._ipv4()
+            value = f"{start}-{end}"
+        elif choice == "ipv4_partial_range":
+            base = ".".join(str(random.choice(self.IPV4_OCTETS)) for _ in range(3))
+            start = random.choice([1, 8, 80, 170, 200])
+            end = random.choice([5, 15, 85, 175, 254])
+            if end < start:
+                start, end = end, start
+            value = f"{base}.{start}-{end}"
+        elif choice == "ipv4_wildcard":
+            base = ".".join(str(random.choice(self.IPV4_OCTETS)) for _ in range(3))
+            value = random.choice(
+                [
+                    f"{base}.[{random.choice(['0123', '5678', '89'])}]",
+                    f"{base}.{random.choice(['1', '8', '9'])}[0-5]",
+                ]
+            )
+        elif choice == "ipv6":
+            value = self._ipv6()
+        elif choice == "ipv6_cidr":
+            value = f"{self._ipv6()}/{random.choice(self.IPV6_PREFIXES)}"
+        else:
+            value = f"{self._ipv6()}-{self._ipv6()}"
+        return value.encode()

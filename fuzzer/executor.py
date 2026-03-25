@@ -56,11 +56,16 @@ _LINUX_BINARIES: dict[str, Path] = {
     "ipv6": _HERE / "ipv4ipv6" / "linux-ipv6-parser",
 }
 
+_WINDOWS_ARGS: dict[str, list[str]] = {}
+_LINUX_ARGS: dict[str, list[str]] = {}
+
 
 def register_binary(
     target: str,
     windows: str | Path | None = None,
     linux: str | Path | None = None,
+    windows_args: list[str] | None = None,
+    linux_args: list[str] | None = None,
 ) -> None:
     """Register binary paths for a new target format.
 
@@ -72,6 +77,10 @@ def register_binary(
         _WINDOWS_BINARIES[target.lower()] = Path(windows)
     if linux is not None:
         _LINUX_BINARIES[target.lower()] = Path(linux)
+    if windows_args is not None:
+        _WINDOWS_ARGS[target.lower()] = list(windows_args)
+    if linux_args is not None:
+        _LINUX_ARGS[target.lower()] = list(linux_args)
 
 # ── Platform helpers ──────────────────────────────────────────────────────────
 
@@ -228,6 +237,7 @@ class Executor:
 
         if _IS_LINUX and linux_bin is not None and linux_bin.exists():
             self.binary  = linux_bin
+            self._fixed_args = list(_LINUX_ARGS.get(target, []))
             _ensure_executable(linux_bin)
             self.timeout = timeout_seconds or TIMEOUT_SECONDS_LINUX
             if afl is not None:
@@ -243,6 +253,7 @@ class Executor:
                     f"Expected {win_bin} or {linux_bin}."
                 )
             self.binary           = win_bin
+            self._fixed_args      = list(_WINDOWS_ARGS.get(target, []))
             self.timeout          = timeout_seconds or TIMEOUT_SECONDS_WIN
             self._mode            = "Windows"
             self._afl_showmap     = None
@@ -293,6 +304,7 @@ class Executor:
             "-q",                            # suppress afl-showmap's own banner/progress
             "--",
             str(self.binary),
+            *self._fixed_args,
             "--ipstr", input_str,
         ]
 
@@ -365,7 +377,7 @@ class Executor:
     # ── Shared binary runner (Linux-no-AFL and Windows) ───────────────────────
 
     def _run_binary(self, input_str: str) -> RunResult:
-        cmd = [str(self.binary), "--ipstr", input_str]
+        cmd = [str(self.binary), *self._fixed_args, "--ipstr", input_str]
         try:
             proc = subprocess.run(
                 cmd,

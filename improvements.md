@@ -4,6 +4,141 @@ Use this file to record meaningful improvements, refactors, feature additions, p
 
 ## 2026-03-26
 
+### One-command fresh restart flag
+Improvements:
+- Added a `--fresh-start` flag that clears `results/<target>/` and removes `models/<target>_surrogate.pt` before the campaign starts.
+- Applied the reset per target, so `python main.py all --fresh-start ...` refreshes each target's run state consistently.
+
+Reasons:
+- Restarting experiments by hand was easy to do inconsistently, especially when comparing clean-start and warm-start behavior.
+- A single reset flag reduces the chance of accidentally reusing stale artifacts or checkpoints.
+
+Key files changed:
+- `main.py`
+- `README.md`
+
+### Adaptive corpus energy for expensive targets
+Improvements:
+- Reworked the in-memory corpus so seed selection is no longer a fixed one-time priority draw and now accounts for seed freshness, historical success, recent reuse, and repeated failed attempts.
+- Added execution feedback from the main fuzzing loop back into the corpus so parent seeds that stop producing new behaviors cool off while newly discovered seeds get extra attention early.
+- Deduplicated identical seeds at corpus insert time and preserved the stronger base priority when the same seed is rediscovered.
+
+Reasons:
+- The opaque parser binaries are expensive to execute, so repeatedly sampling stale seeds wastes a large fraction of the total time budget.
+- A dynamic queue makes the campaign spend more of its limited executions around recently productive areas of the input space instead of treating every old seed as equally valuable forever.
+
+Key files changed:
+- `fuzzer/corpus.py`
+- `main.py`
+
+### Add cidrize target with dedicated semantic mutations
+Improvements:
+- Added a new `cidrize` fuzz target with its own config, seed corpus, and binary registration for the bundled `cidrize-runner-main` subject.
+- Introduced a `CidrizeSemanticMutator` and matching seed generator so ranges, CIDR prefixes, wildcard expressions, and mixed-family IP tokens get target-specific Tier 2 mutations instead of reusing the narrower IPv6 rules.
+- Extended the executor to accept per-target fixed command-line arguments, which allows wrappers like `cidrize-runner` to require `--func cidrize` without special-casing the main loop.
+
+Reasons:
+- `cidrize` accepts a broader human-oriented IP language than the existing IPv6 literal parser, so sharing the same semantic model and mutation rules would bias the campaign toward the wrong grammar.
+- The target’s CLI contract differs slightly from the built-in IPv4/IPv6 parsers, and making that configurable keeps the fuzzer extensible for future binary targets.
+
+Key files changed:
+- `config/cidrize_format.json`
+- `corpus/cidrize_seeds.txt`
+- `fuzzer/mutation/tier2_semantic.py`
+- `fuzzer/seed_generator.py`
+- `fuzzer/executor.py`
+- `main.py`
+
+### Add Atheris-backed JSON target
+Improvements:
+- Added a new `json` fuzz target for the bundled `json-decoder-main` subject, with `config/json_format.json`, a seed corpus, and an Atheris harness at `fuzzer/json_atheris_harness.py`.
+- Taught `main.py` to dispatch `python main.py json ...` into an Atheris-managed campaign while keeping the existing IPv4/IPv6 pipeline unchanged.
+- Added a JSON semantic mutator so structure-aware edits can be reused inside the Atheris custom mutator.
+
+Reasons:
+- The JSON decoder needs real Python instrumentation rather than the subprocess-only behavior hashing used for the opaque parser binaries.
+- Atheris is a better fit for this target because it can instrument the Python parser code path exercised by `json_decoder_stv.py`.
+
+Key files changed:
+- `main.py`
+- `fuzzer/json_atheris_harness.py`
+- `fuzzer/mutation/tier2_semantic.py`
+- `config/json_format.json`
+- `corpus/json_seeds.txt`
+
+### DL training history artifacts
+Improvements:
+- Added per-run DL training logs in `results/<target>/dl_training.jsonl` with loss, timing, execution count, buffer size, behaviors seen, and runtime scheduler metadata for each training round.
+- Added `results/<target>/dl_summary.json` with the run's initial and final DL metadata, whether a checkpoint was reused, and how many training rounds happened during the run.
+
+Reasons:
+- Made it possible to inspect how the surrogate's loss changed during a campaign instead of only seeing the latest checkpoint state.
+- Made warm-start versus fresh-start DL runs easier to compare by recording checkpoint reuse and before/after scheduler metadata.
+
+Key files changed:
+- `main.py`
+- `evaluation/collect_metrics.py`
+
+### Explicit static-mode CLI switch
+Improvements:
+- Added a `--no-dl` command-line flag that forces the static scheduler even when `torch` is installed.
+- Recorded whether DL was enabled in the run configuration output so static-versus-hybrid experiments are easier to audit later.
+
+Reasons:
+- Made static baseline runs much easier to launch without creating a separate Python environment or uninstalling dependencies.
+- Reduced the risk of accidentally comparing a DL-enabled run against a supposed static baseline.
+
+Key files changed:
+- `main.py`
+
+### Startup and execution timing logs
+Improvements:
+- Added startup phase timing logs for format loading, corpus generation, mutator setup, scheduler initialization, havoc priming, and executor initialization.
+- Added explicit logs around the first target execution and follow-up logs for later executions that take at least one second.
+
+Reasons:
+- Made it much easier to tell whether perceived startup slowness comes from corpus generation, torch/checkpoint initialization, executor setup, or the first target run.
+- Reduced the "silent wait" period at the start of a fuzzing run by surfacing when the first execution begins and how long it took.
+
+Key files changed:
+- `main.py`
+
+### Zero-dependency progress plotting
+Improvements:
+- Added `evaluation/plot_progress.py`, a small standard-library-only utility that reads `results/<target>/plot_data` and renders an SVG dashboard with separate panels for each metric.
+- Documented the `plot_data` columns and the new plotting command in the README output section.
+- Added a `unique_bugs.json` artifact so deduplicated bug signatures can be inspected directly instead of only appearing as an in-memory count.
+
+Reasons:
+- Made the new `plot_data` artifact immediately useful without requiring `matplotlib` or a notebook workflow.
+- Made plateaus and slowdowns much easier to read by plotting raw metric values instead of a normalized single overlay.
+- Made demo and post-run analysis easier by persisting the unique bug list with first-seen execution metadata and example inputs.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
+- `evaluation/plot_progress.py`
+- `README.md`
+
+### Mutation-payoff learning loop
+Improvements:
+- Added a lightweight online mutation-payoff tracker that learns from observed success rates and EWMAs for semantic-stage use, havoc operators, semantic fields, guided-versus-random mutations, and seed families.
+- Upgraded both the static scheduler and the hybrid DL scheduler to plan mutations from those payoff statistics, including adaptive havoc operator weights, semantic-stage probability, guided mutation ratio, and preferred productive fields.
+- Extended Tier 2 and Tier 3 mutators to emit per-iteration mutation traces so the scheduler can learn from the actual operator, field, and guidance decisions that produced new behaviors.
+- Wrote learned payoff summaries to `results/<target>/mutation_stats.json` so campaigns can be inspected after a run.
+
+Reasons:
+- Shifted the scheduler closer to the real optimization target: which mutation choices pay off, rather than only which inputs correlate with coverage.
+- Made the adaptive behavior useful even without neural guidance because mutation success statistics now improve the static path too.
+- Created a clearer foundation for future learned policies by separating direct mutation-outcome learning from surrogate coverage prediction.
+
+Key files changed:
+- `fuzzer/scheduler.py`
+- `dl/surrogate.py`
+- `fuzzer/mutation/tier2_semantic.py`
+- `fuzzer/mutation/tier3_havoc.py`
+- `main.py`
+- `evaluation/collect_metrics.py`
+
 ### Hot-byte-guided mutation routing
 Improvements:
 - Added a generic `SemanticSpan` abstraction so Tier 2 mutators can expose meaningful regions of an input and bias edits toward DL-identified hot bytes.

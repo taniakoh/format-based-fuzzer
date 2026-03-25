@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from collections import deque
 
+from fuzzer.scheduler import MutationPayoffTracker
+
 
 def get_device() -> str:
     """Return 'cuda' if a CUDA-capable GPU is available, else 'cpu'."""
@@ -125,13 +127,14 @@ class DLScheduler:
     ):
         self.model = model
         self.trust_gate = trust_gate
-        self.static_weights = self._normalize_weights(format_config["havoc_operators"])
+        self.payoff_tracker = MutationPayoffTracker(format_config["havoc_operators"])
+        self.static_weights = dict(self.payoff_tracker.static_weights)
         self.device = device if device is not None else get_device()
         self.training_samples_seen = 0
         self.training_rounds = 0
         self.last_training_loss: float | None = None
         self._recent_results: deque[tuple[str, bool]] = deque(maxlen=self.RECENT_WINDOW)
-        self._last_plan = self._make_static_plan()
+        self._last_plan = self._make_static_plan(b"")
         if hasattr(self.model, "to"):
             self.model.to(self.device)
 
@@ -140,25 +143,42 @@ class DLScheduler:
 
     def get_seed_priority(self, seed: bytes) -> float:
         plan = self.plan_mutation(seed)
+        family_score = self.payoff_tracker._score(  # noqa: SLF001
+            self.payoff_tracker.seed_family_stats.get(str(plan["seed_family"]))
+        )
+        base_priority = 1.0 + ((family_score - self.payoff_tracker.PRIOR_SCORE) * 0.5)
         if plan["mode"] == "static":
-            return 1.0
+            return base_priority
         confidence = float(plan["confidence"])
         blend = float(plan["blend"])
-        return 1.0 + (confidence * blend * self.BOOSTED_PRIORITY_SCALE)
+        return base_priority + (confidence * blend * self.BOOSTED_PRIORITY_SCALE)
 
     def plan_mutation(self, seed: bytes) -> dict[str, object]:
-        plan = self._make_static_plan()
+        plan = self._make_static_plan(seed)
         try:
             x = self._encode(seed)
             _, confidence = self.model(x)
-            plan = self._make_plan(float(confidence.item()))
+            plan = self._make_plan(seed, float(confidence.item()))
         except Exception:
             pass
         self._last_plan = plan
         return plan
 
-    def record_result(self, mode: str, discovered_new_behavior: bool) -> None:
+    def record_mutation_outcome(
+        self,
+        plan: dict[str, object],
+        discovered_new_behavior: bool,
+        semantic_trace: dict[str, object] | None = None,
+        havoc_trace: dict[str, object] | None = None,
+    ) -> None:
+        mode = str(plan.get("mode", "static"))
         self._recent_results.append((mode, discovered_new_behavior))
+        self.payoff_tracker.record_mutation_outcome(
+            plan=plan,
+            discovered_new_behavior=discovered_new_behavior,
+            semantic_trace=semantic_trace,
+            havoc_trace=havoc_trace,
+        )
 
     def record_training(self, sample_count: int, loss: float | None = None) -> None:
         self.training_samples_seen = max(self.training_samples_seen, max(0, sample_count))
@@ -180,6 +200,9 @@ class DLScheduler:
             "last_training_loss": self.last_training_loss,
         }
 
+    def export_mutation_stats(self) -> dict[str, object]:
+        return self.payoff_tracker.export_mutation_stats()
+
     def get_field_importance(self, seed: bytes) -> list[int]:
         return identify_hot_bytes(self.model, seed, device=self.device)
 
@@ -200,56 +223,58 @@ class DLScheduler:
         padded = list(seed[:max_len]) + [0] * (max_len - len(seed))
         return torch.tensor([padded], dtype=torch.long, device=self.device)
 
-    def _learned_weights(self) -> dict[str, float]:
-        ops = list(self.static_weights.keys())
-        weight = 1.0 / len(ops)
-        return {op: weight for op in ops}
-
-    def _make_static_plan(self) -> dict[str, object]:
-        return {
+    def _make_static_plan(self, seed: bytes) -> dict[str, object]:
+        plan = self.payoff_tracker.plan(seed, base_blend=1.0)
+        plan.update({
             "mode": "static",
-            "weights": dict(self.static_weights),
             "confidence": 0.0,
             "blend": 0.0,
             "reason": "fallback",
-        }
+        })
+        return plan
 
-    def _make_plan(self, confidence_score: float) -> dict[str, object]:
+    def _make_plan(self, seed: bytes, confidence_score: float) -> dict[str, object]:
         if not self.trust_gate(confidence_score):
-            return self._static_reason("low_confidence", confidence_score)
+            return self._static_reason(seed, "low_confidence", confidence_score)
 
         if self.training_samples_seen < self.WARMUP_SAMPLES:
-            return self._static_reason("undertrained_samples", confidence_score)
+            return self._static_reason(seed, "undertrained_samples", confidence_score)
 
         if self.training_rounds < self.WARMUP_TRAINING_ROUNDS:
-            return self._static_reason("undertrained_rounds", confidence_score)
+            return self._static_reason(seed, "undertrained_rounds", confidence_score)
 
         recent_factor = self._recent_performance_factor()
         if recent_factor <= 0.0:
-            return self._static_reason("recent_underperformance", confidence_score)
+            return self._static_reason(seed, "recent_underperformance", confidence_score)
 
         confidence_factor = self._confidence_factor(confidence_score)
         blend = min(
             self.MAX_GUIDED_BLEND,
             max(self.MIN_GUIDED_BLEND, confidence_factor * recent_factor),
         )
-        learned = self._learned_weights()
-        return {
+        plan = self.payoff_tracker.plan(seed, base_blend=blend)
+        plan.update({
             "mode": "guided",
-            "weights": self._blend_weights(self.static_weights, learned, blend),
             "confidence": confidence_score,
             "blend": blend,
             "reason": "hybrid_guidance",
-        }
+        })
+        return plan
 
-    def _static_reason(self, reason: str, confidence_score: float) -> dict[str, object]:
-        return {
+    def _static_reason(
+        self,
+        seed: bytes,
+        reason: str,
+        confidence_score: float,
+    ) -> dict[str, object]:
+        plan = self.payoff_tracker.plan(seed, base_blend=1.0)
+        plan.update({
             "mode": "static",
-            "weights": dict(self.static_weights),
             "confidence": confidence_score,
             "blend": 0.0,
             "reason": reason,
-        }
+        })
+        return plan
 
     def _recent_performance_factor(self) -> float:
         guided = [hit for mode, hit in self._recent_results if mode == "guided"]
@@ -276,23 +301,3 @@ class DLScheduler:
             return 0.0
         span = max(1e-6, 1.0 - threshold)
         return min(1.0, (confidence_score - threshold) / span)
-
-    def _blend_weights(
-        self,
-        static: dict[str, float],
-        learned: dict[str, float],
-        blend: float,
-    ) -> dict[str, float]:
-        weights = {
-            op: ((1.0 - blend) * static[op]) + (blend * learned[op])
-            for op in static
-        }
-        return self._normalize_weights(weights)
-
-    def _normalize_weights(self, weights: dict[str, float]) -> dict[str, float]:
-        total = sum(max(0.0, value) for value in weights.values())
-        if total <= 0:
-            ops = list(weights.keys())
-            uniform = 1.0 / max(1, len(ops))
-            return {op: uniform for op in ops}
-        return {op: max(0.0, value) / total for op, value in weights.items()}
