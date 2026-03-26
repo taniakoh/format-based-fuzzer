@@ -6,3 +6,5 @@ AGENTS.md
 dl/__pycache__\
 fuzzer/mutation/__pycache__\
 .gitignore
+.venv\
+.venv/

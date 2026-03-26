@@ -4,6 +4,21 @@ Use this file to record meaningful improvements, refactors, feature additions, p
 
 ## 2026-03-26
 
+### Refresh README and pipeline docs for executor/oracle changes
+Improvements:
+- Updated `README.md` and `PIPELINE.md` to document the current executor modes, including Linux `QEMU` edge coverage via `afl-showmap` and the Linux fallback behavior-hash path.
+- Documented the oracle-assisted bug classification flow, including the `oracle_mismatch` bug type and the current per-target oracle coverage.
+- Corrected stale operational details such as Linux timeout values and current checkpoint/output expectations.
+
+Reasons:
+- The implementation has moved beyond the older Windows-only behavior-hash description, so the top-level docs needed to reflect how runs are actually executed today.
+- Accurate docs make it much easier to interpret run artifacts and compare static, hybrid, and instrumented campaigns correctly.
+
+Key files changed:
+- `README.md`
+- `PIPELINE.md`
+- `improvements.md`
+
 ### One-command fresh restart flag
 Improvements:
 - Added a `--fresh-start` flag that clears `results/<target>/` and removes `models/<target>_surrogate.pt` before the campaign starts.
@@ -256,4 +271,3 @@ Reasons:
 
 Key files changed:
 - `fuzzer/json_atheris_harness.py`
-

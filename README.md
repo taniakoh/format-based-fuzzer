@@ -1,6 +1,9 @@
 # Hybrid Coverage-Guided Fuzzer
 
 A format-aware fuzzer targeting IPv4, IPv6, cidrize, and a bundled JSON decoder.
+For binary targets, the executor now supports three runtime modes: Windows
+behavior hashing, Linux behavior hashing, and AFL++ QEMU edge coverage when
+`afl-showmap` is available.
 
 ## Project Structure
 
@@ -72,6 +75,15 @@ python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_
 
 > Without torch installed, or when `--no-dl` is used, the binary targets run with the static/payoff-tracking scheduler only.
 
+### Linux edge coverage with AFL++ QEMU - optional
+
+On Linux, if the target has a registered `binary_linux` path and `afl-showmap`
+is installed, the executor switches to `QEMU` mode automatically and records a
+real 65,536-byte AFL++ edge bitmap instead of the fallback behavior hash.
+
+If `afl-showmap` is not installed, Linux still runs natively, but coverage
+falls back to the same behavior-hash model used on Windows.
+
 ### JSON target requirements
 
 The `json` target uses [Atheris](https://github.com/google/atheris) for instrumentation.
@@ -128,10 +140,18 @@ python main.py ipv4 --time-budget 3600 --seed 123
 python main.py ipv4 --time-budget 3600 --no-dl
 
 # Start from a clean slate
-python main.py ipv4 --time-budget 3600 --fresh-start
+python3 main.py ipv4 --time-budget 100 --fresh-start
+
+
 ```
 
-> On Windows, the IPv4/IPv6 parser bundles are PyInstaller one-file executables. Each execution takes about 20-30 seconds to unpack, so expect roughly 120 executions per hour there.
+> On Linux, `afl-showmap` enables `QEMU` mode with real edge coverage. Without
+> it, Linux uses the faster fallback `Linux` mode with behavior hashing and a
+> 30-second timeout.
+
+> On Windows, the parser bundles are PyInstaller one-file executables. Each
+> execution can take about 20-30 seconds to unpack, so expect much lower exec/s
+> than on Linux.
 
 > The `json` target is different: it launches an Atheris/libFuzzer campaign in `results/json/` and lets Atheris manage corpus growth and coverage guidance directly.
 
@@ -233,14 +253,36 @@ actual edit.
 
 ---
 
+## Execution Modes and Bug Classification
+
+Binary targets now go through an oracle-assisted executor path:
+
+- `QEMU`: Linux binary plus `afl-showmap -Q`, yielding real AFL++ edge coverage
+- `Linux`: native Linux binary execution with fallback behavior hashing
+- `Windows`: PyInstaller `.exe` execution with fallback behavior hashing
+
+For the binary targets, bug types are derived from process state plus an
+independent oracle:
+
+- `validity`: the oracle says the input should be valid, but the parser rejects it
+- `invalidity`: the oracle says the input should be invalid and the parser raises a `ParseException`
+- `oracle_mismatch`: the oracle says the input should be invalid, but the parser accepts it
+- `bonus`: unexpected exception on an oracle-invalid or oracle-unsupported input
+- `CRASH` / `TIMEOUT`: process failure or timeout
+
+Current built-in oracles cover IPv4, IPv6, and cidrize. The JSON target uses a
+separate stdlib-JSON oracle inside the Atheris harness.
+
+---
+
 ## Output
 
 All results are written to `results/<target>/`:
 
 | File | Contents |
 |---|---|
-| `bugs.jsonl` | One JSON record per interesting result (input, bug type, exception) |
-| `unique_bugs.json` | Deduplicated bug signatures with first-seen execution and one example input |
+| `bugs.jsonl` | One JSON record per interesting result, including the saved bug signature and captured output |
+| `unique_bugs.json` | Deduplicated bug signatures with first-seen execution, oracle context, and one example input |
 | `crashes/crash_NNNNNN.txt` | One file per crashing input |
 | `queue/id_NNNNNN.txt` | Interesting inputs re-added to the corpus, with exec number and priority |
 | `plot_data` | CSV progress samples over time (`relative_time_sec`, `total_execs`, `behaviors_seen`, `corpus_size`, `unique_bugs`, `unique_crashes`) |
@@ -264,8 +306,9 @@ For the `json` target specifically:
 |---|---|
 | `validity` | Valid input falsely rejected by the parser - real bug |
 | `bonus` | Unexpected exception raised - real bug |
+| `oracle_mismatch` | Oracle expected rejection, but the parser accepted the input - real bug |
 | `invalidity` | Expected `ParseException` on an invalid input |
-| `CRASH` / `TIMEOUT` | Non-zero exit code or process exceeded 60 s timeout |
+| `CRASH` / `TIMEOUT` | Non-zero exit code or process exceeded the executor timeout for that mode |
 
 ### Console output
 
@@ -290,12 +333,12 @@ time so plateaus are easier to spot than in a normalized single-line overlay.
 Read the panels like this:
 
 - `behaviors_seen`: your proxy coverage growth
-- `unique_bugs`: distinct `(bug_type, exception)` signatures found so far
+- `unique_bugs`: distinct saved bug signatures found so far
 - `corpus_size`: how many interesting seeds entered the queue
 - `unique_crashes`: distinct crash signatures, deduplicated by `(bug_type, exit_code, exception)`
 
 For demo-friendly bug inspection, open `results/<target>/unique_bugs.json`.
-It stores one entry per distinct `(bug_type, exception)` signature along with
+It stores one entry per distinct saved bug signature along with
 the first execution where it appeared and an example triggering input.
 
 ---
@@ -307,6 +350,7 @@ When torch is installed and DL is not disabled, the fuzzer trains a neural surro
 ```text
 models/ipv4_surrogate.pt
 models/ipv6_surrogate.pt
+models/cidrize_surrogate.pt
 ```
 
 The checkpoint also stores optimizer state and lightweight scheduler metadata,

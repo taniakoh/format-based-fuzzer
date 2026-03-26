@@ -8,13 +8,66 @@ Writes results to results/<target>/stats.txt and bugs.jsonl.
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
+import signal
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 _HERE = Path(__file__).parent.parent
 RESULTS_DIR = _HERE / "results"
+
+
+def _first_nonempty_line(text: str) -> str:
+    for line in text.splitlines():
+        cleaned = line.strip()
+        if cleaned:
+            return cleaned
+    return ""
+
+
+def _normalize_fragment(text: str, limit: int = 200) -> str:
+    fragment = _first_nonempty_line(text)
+    if not fragment:
+        return ""
+    if len(fragment) <= limit:
+        return fragment
+    return fragment[: limit - 3] + "..."
+
+
+def _signal_name(exit_code: int | None) -> str | None:
+    if exit_code is None or exit_code >= 0:
+        return None
+    try:
+        return signal.Signals(-exit_code).name
+    except ValueError:
+        return f"SIG{-exit_code}"
+
+
+def _bitmap_digest(bitmap: bytes | None) -> str:
+    if not bitmap or not any(bitmap):
+        return ""
+    return hashlib.sha256(bitmap).hexdigest()[:16]
+
+
+def _make_bug_signature(result, bitmap: bytes | None = None) -> dict[str, object]:
+    signal_name = _signal_name(result.exit_code)
+    output_summary = (
+        _normalize_fragment(result.stderr)
+        or _normalize_fragment(result.stdout)
+        or _normalize_fragment(result.traceback)
+    )
+    signature = {
+        "bug_type": str(result.bug_type),
+        "exit_code": result.exit_code,
+        "signal": signal_name,
+        "exception": str(result.exception_msg),
+        "output_summary": output_summary,
+        "bitmap_digest": _bitmap_digest(bitmap),
+    }
+    signature["key"] = json.dumps(signature, sort_keys=True)
+    return signature
 
 
 @dataclass
@@ -25,6 +78,7 @@ class FuzzMetrics:
     unique_crashes: int = 0
     validity_bugs: int = 0
     bonus_bugs: int = 0
+    oracle_mismatches: int = 0
     invalidity_count: int = 0
     total_executions: int = 0
     time_to_first_bug: float | None = None
@@ -37,9 +91,9 @@ class MetricsCollector:
         self.target = target
         self.metrics = FuzzMetrics(target=target)
         self._start = time.time()
-        self._bug_signatures: set[tuple[str, str]] = set()
-        self._unique_bug_entries: dict[tuple[str, str], dict[str, object]] = {}
-        self._crash_signatures: set[tuple[str, int | None, str]] = set()
+        self._bug_signatures: set[str] = set()
+        self._unique_bug_entries: dict[str, dict[str, object]] = {}
+        self._crash_signatures: set[str] = set()
         self._out = RESULTS_DIR / target
         (self._out / "crashes").mkdir(parents=True, exist_ok=True)
         (self._out / "queue").mkdir(parents=True, exist_ok=True)
@@ -97,7 +151,7 @@ class MetricsCollector:
         """Persist a concise DL run summary."""
         self._write_dl_summary(summary)
 
-    def record_execution(self, input_data: bytes, result) -> None:
+    def record_execution(self, input_data: bytes, result, bitmap: bytes | None = None) -> None:
         """Record one fuzzer execution result."""
         self.metrics.total_executions += 1
         input_str = input_data.decode("latin-1", errors="replace")
@@ -106,16 +160,27 @@ class MetricsCollector:
         if result.bug_type == BugType.PASS:
             return
 
-        signature = (result.bug_type, result.exception_msg)
-        self._bug_signatures.add(signature)
-        self.metrics.unique_bug_count = len(self._bug_signatures)
-        if signature not in self._unique_bug_entries:
-            self._unique_bug_entries[signature] = {
+        signature = _make_bug_signature(result, bitmap)
+        signature_key = str(signature["key"])
+        if result.is_real_bug:
+            self._bug_signatures.add(signature_key)
+            self.metrics.unique_bug_count = len(self._bug_signatures)
+        if result.is_real_bug and signature_key not in self._unique_bug_entries:
+            self._unique_bug_entries[signature_key] = {
                 "bug_type": result.bug_type,
+                "signature": {k: v for k, v in signature.items() if k != "key"},
                 "exception": result.exception_msg,
                 "first_seen_exec": self.metrics.total_executions,
                 "example_input": input_str,
                 "exit_code": result.exit_code,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "traceback": result.traceback,
+                "oracle": {
+                    "supported": bool(getattr(result.oracle, "supported", False)),
+                    "expected_valid": getattr(result.oracle, "expected_valid", None),
+                    "reason": getattr(result.oracle, "reason", ""),
+                },
             }
             self._write_unique_bugs()
 
@@ -127,8 +192,12 @@ class MetricsCollector:
             "exec": self.metrics.total_executions,
             "input": input_str,
             "bug_type": result.bug_type,
+            "signature": {k: v for k, v in signature.items() if k != "key"},
             "exit_code": result.exit_code,
             "exception": result.exception_msg,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "traceback": result.traceback,
         }
         with open(self._out / "bugs.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
@@ -137,20 +206,28 @@ class MetricsCollector:
             self.metrics.validity_bugs += 1
         elif result.bug_type == BugType.BONUS:
             self.metrics.bonus_bugs += 1
+        elif result.bug_type == BugType.ORACLE_MISMATCH:
+            self.metrics.oracle_mismatches += 1
         elif result.bug_type == BugType.INVALIDITY:
             self.metrics.invalidity_count += 1
         elif result.is_crash:
-            crash_signature = (
-                str(result.bug_type),
-                result.exit_code if result.exit_code is None else int(result.exit_code),
-                str(result.exception_msg),
-            )
+            crash_signature = signature_key
             if crash_signature not in self._crash_signatures:
                 self._crash_signatures.add(crash_signature)
                 self.metrics.unique_crashes = len(self._crash_signatures)
                 crash_id = self.metrics.unique_crashes
                 crash_path = self._out / "crashes" / f"crash_{crash_id:06d}.txt"
-                crash_path.write_text(input_str, encoding="utf-8", errors="replace")
+                crash_report = (
+                    f"bug_type={result.bug_type}\n"
+                    f"signature={json.dumps({k: v for k, v in signature.items() if k != 'key'}, sort_keys=True)}\n"
+                    f"exit_code={result.exit_code}\n"
+                    f"exception={result.exception_msg}\n"
+                    f"input={input_str}\n"
+                    f"stdout={result.stdout}\n"
+                    f"stderr={result.stderr}\n"
+                    f"traceback={result.traceback}\n"
+                )
+                crash_path.write_text(crash_report, encoding="utf-8", errors="replace")
                 self.metrics.crash_log.append(str(crash_path))
 
     def record_queue_entry(self, seed: bytes, exec_count: int, priority: float) -> None:
@@ -217,6 +294,7 @@ class MetricsCollector:
             f"Unique bugs     : {m.unique_bug_count}",
             f"Validity bugs   : {m.validity_bugs}",
             f"Bonus bugs      : {m.bonus_bugs}",
+            f"Oracle mismatch : {m.oracle_mismatches}",
             f"Invalidity count: {m.invalidity_count}",
             f"Unique crashes  : {m.unique_crashes}",
             f"Time-to-1st-bug : {m.time_to_first_bug:.1f}s" if m.time_to_first_bug else "Time-to-1st-bug : N/A",

@@ -34,7 +34,7 @@ Tier 3 havoc mutator
 Executor.run(mutated)
         |
         v
-RunResult + behavior bitmap
+RunResult + oracle-assisted classification + coverage bitmap
         |
         v
 CoverageAnalyzer.is_interesting()
@@ -190,14 +190,16 @@ Important implementation details for the binary targets:
 
 - `stdin=subprocess.DEVNULL` is always used
 - Windows parser bundles get a 60-second timeout because of PyInstaller unpack overhead
-- Linux native binaries use a 5-second timeout
+- Linux native binaries use a 30-second timeout
 - stdout/stderr are parsed into a `RunResult` containing `bug_type`, `exception_msg`, traceback text, and exit code
+- IPv4, IPv6, and cidrize runs are passed through a lightweight oracle before the final bug type is recorded
 
 Bug classification is derived from parser output plus process state:
 
 - `PASS`
 - `validity`
 - `invalidity`
+- `oracle_mismatch`
 - `bonus`
 - `CRASH`
 - `TIMEOUT`
@@ -208,11 +210,12 @@ Bug classification is derived from parser output plus process state:
 
 **Files:** `fuzzer/executor.py`, `fuzzer/coverage.py`
 
-For non-instrumented runs, coverage is approximated with a 65,536-byte bitmap:
+Coverage now depends on executor mode:
 
-1. `PASS` returns an all-zero bitmap.
-2. Otherwise, `"<bug_type>|<exception_msg[:128]>"` is SHA-256 hashed into a stable slot.
-3. `CRASH`, `TIMEOUT`, and `validity` set a second slot as well so they remain interesting even when repeated.
+1. In `QEMU` mode, `afl-showmap -Q` returns a real 65,536-byte AFL++ edge bitmap.
+2. In `Linux` and `Windows` fallback modes, `PASS` returns an all-zero bitmap.
+3. Otherwise, `"<bug_type>|<exception_msg[:128]>"` is SHA-256 hashed into a stable slot.
+4. `CRASH`, `TIMEOUT`, and `validity` set a second slot as well so they remain interesting even when repeated.
 
 `CoverageAnalyzer.is_interesting(bitmap)` merges that bitmap into the global run bitmap and returns `True` if any slot flipped from `0` to `1`.
 
@@ -227,7 +230,7 @@ That count is reported as `Behaviors seen`.
 Every execution is recorded:
 
 - `bugs.jsonl` gets one entry for every non-`PASS` result
-- `unique_bugs.json` tracks distinct `(bug_type, exception_msg)` signatures
+- `unique_bugs.json` tracks distinct runtime signatures derived from bug type, exit metadata, output fragments, and bitmap digest
 - `crashes/` stores unique crash inputs
 - `plot_data` appends a CSV progress point
 
@@ -245,6 +248,9 @@ Additional run artifacts written by the current implementation:
 - `mutation_stats.json`
 - `dl_training.jsonl`
 - `dl_summary.json`
+
+Metrics summaries now also track `oracle_mismatch` separately from `validity`,
+`bonus`, and `invalidity`.
 
 ---
 
@@ -320,6 +326,8 @@ The main outputs for that path are:
 - `fuzzer_stats`
 
 Because Atheris owns the execution loop, the DL scheduler, behavior bitmap, and corpus feedback path described above apply only to the binary targets.
+The JSON harness also uses Python's stdlib `json.loads` as an oracle to report
+accept/reject and semantic mismatches against the bundled decoder.
 
 ---
 
@@ -335,5 +343,5 @@ Because Atheris owns the execution loop, the DL scheduler, behavior bitmap, and 
 | DL warm-up samples | 20 | `dl/surrogate.py` |
 | DL warm-up rounds | 2 | `dl/surrogate.py` |
 | Windows timeout | 60 s | `fuzzer/executor.py` |
-| Linux timeout | 5 s | `fuzzer/executor.py` |
+| Linux timeout | 30 s | `fuzzer/executor.py` |
 | Default havoc iterations | 8 | `main.py` |

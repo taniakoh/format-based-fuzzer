@@ -42,7 +42,7 @@ _HERE = Path(__file__).parent.parent
 
 # Timeouts
 TIMEOUT_SECONDS_WIN   = 60   # PyInstaller bundles need ~20-30 s to unpack
-TIMEOUT_SECONDS_LINUX = 5    # Native ELF — no unpack overhead
+TIMEOUT_SECONDS_LINUX = 30   # Native ELF — no unpack overhead
 
 BITMAP_SIZE = 65536
 
@@ -97,8 +97,11 @@ def _afl_showmap() -> str | None:
 def _ensure_executable(path: Path) -> None:
     """Make sure a Linux binary has the execute bit set."""
     if _IS_LINUX:
-        current = path.stat().st_mode
-        path.chmod(current | 0o111)
+        try:
+            current = path.stat().st_mode
+            path.chmod(current | 0o111)
+        except PermissionError:
+            pass  # /mnt/c (NTFS) doesn't support chmod; file is already executable
 
 
 # ── Output parsing ────────────────────────────────────────────────────────────
@@ -107,9 +110,7 @@ _TRACEBACK_BLOCK_RE = re.compile(
     r"={60}\s*\nTRACEBACK\s*\n={60}\s*\n(.*?)\n={60}",
     re.DOTALL,
 )
-_BUG_COUNT_RE  = re.compile(r"Final bug count:\s*defaultdict\([^,]+,\s*(\{.*?\})\)")
-_BUG_TYPE_RE   = re.compile(r"\('(validity|invalidity|bonus)'")
-_BUG_KEY_MSG_RE = re.compile(r"\('[^']+',\s*[^,]+,\s*\"(.*?)\"", re.DOTALL)
+_TRACEBACK_LAST_LINE_RE = re.compile(r"^\s*([\w.]+):\s*(.*)$")
 
 
 class BugType:
@@ -156,37 +157,64 @@ class RunResult:
         )
 
 
-def _parse_output(stdout: str, stderr: str) -> tuple[str, str, str]:
+def _parse_output(stdout: str, stderr: str) -> tuple[str, str]:
     combined = stdout + "\n" + stderr
 
     tb_match       = _TRACEBACK_BLOCK_RE.search(combined)
     traceback_text = tb_match.group(1).strip() if tb_match else ""
 
     exception_msg = ""
-    bc_match = _BUG_COUNT_RE.search(combined)
-    if bc_match:
-        count_dict_str = bc_match.group(1)
-        bt_match = _BUG_TYPE_RE.search(count_dict_str)
-        if bt_match:
-            bug_type = bt_match.group(1)
-        else:
-            bug_type = BugType.BONUS if traceback_text else BugType.PASS
-        msg_match = _BUG_KEY_MSG_RE.search(count_dict_str)
-        if msg_match:
-            exception_msg = msg_match.group(1).strip()
-    elif "No bugs found" in combined:
-        bug_type = BugType.PASS
-    elif traceback_text:
-        bug_type = BugType.BONUS
-    else:
-        bug_type = BugType.PASS
-
-    if not exception_msg and traceback_text:
+    if traceback_text:
         lines = [l for l in traceback_text.splitlines() if l.strip()]
         if lines:
             exception_msg = lines[-1].strip()
+    if not exception_msg:
+        exception_msg = _summarize_process_failure(stdout, stderr, None)
+        if exception_msg == "process failed before reporting an exit code":
+            exception_msg = ""
 
-    return bug_type, exception_msg, traceback_text
+    return exception_msg, traceback_text
+
+
+def _traceback_exception_type(traceback_text: str) -> str:
+    """Return the exception class name from the traceback footer when present."""
+    if not traceback_text:
+        return ""
+    lines = [line.strip() for line in traceback_text.splitlines() if line.strip()]
+    if not lines:
+        return ""
+    match = _TRACEBACK_LAST_LINE_RE.match(lines[-1])
+    if not match:
+        return ""
+    return match.group(1)
+
+
+def _cli_safe_input(input_data: bytes) -> str:
+    """Render fuzz bytes as a CLI-safe text argument.
+
+    The parser targets accept text via ``--ipstr``. Some byte sequences, most
+    notably ``0x00``, cannot be transported through argv at all and would cause
+    Python's subprocess layer to fail before the target launches. We therefore
+    keep printable ASCII as-is and escape everything else into a stable textual
+    representation.
+    """
+    return input_data.decode("latin-1", errors="replace").encode(
+        "unicode_escape"
+    ).decode("ascii")
+
+
+def _summarize_process_failure(
+    stdout: str, stderr: str, returncode: int | None
+) -> str:
+    """Extract a stable crash signature for launcher/runtime failures."""
+    for stream in (stderr, stdout):
+        for line in stream.splitlines():
+            message = line.strip()
+            if message:
+                return message[:200]
+    if returncode is None:
+        return "process failed before reporting an exit code"
+    return f"process exited with code {returncode}"
 
 
 # ── Behavior bitmap (fallback for non-QEMU modes) ─────────────────────────────
@@ -287,8 +315,7 @@ class Executor:
         -------
         (behavior_bitmap, crashed, result)
         """
-        input_str = input_data.decode("latin-1", errors="replace")
-        input_str = input_str.encode("ascii", errors="backslashreplace").decode("ascii")
+        input_str = _cli_safe_input(input_data)
 
         if self._mode == "QEMU":
             return self._run_with_qemu(input_str)
@@ -373,9 +400,12 @@ class Executor:
             except OSError:
                 pass
 
-        bug_type, exc_msg, tb = _parse_output(stdout, stderr)
-        if proc.returncode not in (0, 1) and bug_type == BugType.PASS:
+        exc_msg, tb = _parse_output(stdout, stderr)
+        if proc.returncode not in (0, 1):
             bug_type = BugType.CRASH
+            exc_msg = _summarize_process_failure(stdout, stderr, proc.returncode)
+        else:
+            bug_type = BugType.PASS
 
         result = RunResult(
             input_str=input_str,
@@ -421,10 +451,13 @@ class Executor:
 
         stdout = proc.stdout or ""
         stderr = proc.stderr or ""
-        bug_type, exc_msg, tb = _parse_output(stdout, stderr)
+        exc_msg, tb = _parse_output(stdout, stderr)
 
-        if proc.returncode not in (0, 1) and bug_type == BugType.PASS:
+        if proc.returncode not in (0, 1):
             bug_type = BugType.CRASH
+            exc_msg = _summarize_process_failure(stdout, stderr, proc.returncode)
+        else:
+            bug_type = BugType.PASS
 
         result = RunResult(
             input_str=input_str,
@@ -440,21 +473,39 @@ class Executor:
     def _apply_oracle(self, result: RunResult) -> RunResult:
         verdict = evaluate_target_input(self.target, result.input_str)
         result.oracle = verdict
+        if result.bug_type in (BugType.CRASH, BugType.TIMEOUT):
+            return result
+
+        observed_rejection = bool(result.traceback)
+        exc_type = _traceback_exception_type(result.traceback)
+        is_parse_rejection = exc_type.endswith("ParseException")
+
         if not verdict.supported:
+            result.bug_type = BugType.BONUS if observed_rejection else BugType.PASS
             return result
 
-        if result.bug_type == BugType.PASS and verdict.expected_valid is False:
-            result.bug_type = BugType.ORACLE_MISMATCH
-            result.exception_msg = (
-                "Oracle expected rejection, but parser accepted the input "
-                f"({verdict.reason})"
-            )
+        if verdict.expected_valid is True:
+            if observed_rejection:
+                result.bug_type = BugType.VALIDITY
+                detail = result.exception_msg or "Parser rejected oracle-valid input"
+                result.exception_msg = f"{detail} [oracle={verdict.reason}]"
+            else:
+                result.bug_type = BugType.PASS
             return result
 
-        if result.bug_type == BugType.INVALIDITY and verdict.expected_valid is True:
-            result.bug_type = BugType.VALIDITY
-            detail = result.exception_msg or "Parser rejected oracle-valid input"
-            result.exception_msg = f"{detail} [oracle={verdict.reason}]"
+        if verdict.expected_valid is False:
+            if not observed_rejection:
+                result.bug_type = BugType.ORACLE_MISMATCH
+                result.exception_msg = (
+                    "Oracle expected rejection, but parser accepted the input "
+                    f"({verdict.reason})"
+                )
+            elif is_parse_rejection:
+                result.bug_type = BugType.INVALIDITY
+            else:
+                result.bug_type = BugType.BONUS
+                detail = result.exception_msg or "Parser raised a non-ParseException"
+                result.exception_msg = f"{detail} [oracle={verdict.reason}]"
             return result
 
         return result

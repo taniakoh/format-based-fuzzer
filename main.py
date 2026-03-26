@@ -441,7 +441,7 @@ def fuzz(
                 f"duration={execution_ms:7.1f} ms bug_type={result.bug_type}"
             )
 
-        metrics.record_execution(mutated, result)
+        metrics.record_execution(mutated, result, bitmap)
 
         is_new = coverage.is_interesting(bitmap)
         corpus.record_result(seed, is_new)
