@@ -111,6 +111,10 @@ _TRACEBACK_BLOCK_RE = re.compile(
     re.DOTALL,
 )
 _TRACEBACK_LAST_LINE_RE = re.compile(r"^\s*([\w.]+):\s*(.*)$")
+_STDERR_TRACEBACK_RE = re.compile(r"(Traceback \(most recent call last\):.*)", re.DOTALL)
+_PARSER_VALIDITY_RE = re.compile(r"\bA validity bug has been triggered:\s*(.+)", re.IGNORECASE)
+_PARSER_INVALIDITY_RE = re.compile(r"\bAn invalidity bug has been triggered:\s*(.+)", re.IGNORECASE)
+_PARSER_FINAL_BUG_RE = re.compile(r"\('(?P<kind>validity|invalidity|bonus)'", re.IGNORECASE)
 
 
 class BugType:
@@ -121,6 +125,8 @@ class BugType:
     CRASH      = "CRASH"
     TIMEOUT    = "TIMEOUT"
     ORACLE_MISMATCH = "oracle_mismatch"
+    ORACLE_UNKNOWN_ACCEPT = "oracle_unknown_accept"
+    ORACLE_UNKNOWN_REJECT = "oracle_unknown_reject"
 
 
 @dataclass
@@ -133,6 +139,8 @@ class RunResult:
     exception_msg: str = ""
     traceback:     str = ""
     oracle:        OracleVerdict | None = None
+    parser_reported_bug_type: str | None = None
+    parser_reported_message: str = ""
 
     @property
     def is_interesting(self) -> bool:
@@ -162,6 +170,10 @@ def _parse_output(stdout: str, stderr: str) -> tuple[str, str]:
 
     tb_match       = _TRACEBACK_BLOCK_RE.search(combined)
     traceback_text = tb_match.group(1).strip() if tb_match else ""
+    if not traceback_text:
+        stderr_tb = _STDERR_TRACEBACK_RE.search(stderr)
+        if stderr_tb:
+            traceback_text = stderr_tb.group(1).strip()
 
     exception_msg = ""
     if traceback_text:
@@ -174,6 +186,57 @@ def _parse_output(stdout: str, stderr: str) -> tuple[str, str]:
             exception_msg = ""
 
     return exception_msg, traceback_text
+
+
+def _parser_reported_bug(stdout: str) -> tuple[str | None, str]:
+    """Extract the parser-declared bug family and message from stdout."""
+    match = _PARSER_VALIDITY_RE.search(stdout)
+    if match:
+        return BugType.VALIDITY, match.group(1).strip()
+
+    match = _PARSER_INVALIDITY_RE.search(stdout)
+    if match:
+        return BugType.INVALIDITY, match.group(1).strip()
+
+    match = _PARSER_FINAL_BUG_RE.search(stdout)
+    if match:
+        return match.group("kind").lower(), ""
+
+    return None, ""
+
+
+def _taxonomy_tags(result: "RunResult") -> list[str]:
+    tags: list[str] = []
+
+    if result.parser_reported_bug_type == BugType.VALIDITY or result.bug_type == BugType.VALIDITY:
+        tags.append("ValidityBug")
+    elif result.parser_reported_bug_type == BugType.INVALIDITY or result.bug_type == BugType.INVALIDITY:
+        tags.append("InvalidityBug")
+
+    if result.bug_type == BugType.ORACLE_MISMATCH:
+        tags.append("FunctionalBug")
+    if result.is_crash:
+        tags.append("ReliabilityBug")
+        if result.bug_type == BugType.TIMEOUT:
+            tags.append("PerformanceBug")
+    if result.bug_type == BugType.BONUS:
+        tags.append("Bonus/UntrackedBugs")
+    if _is_boundary_input(result.input_str):
+        tags.append("BoundaryBug")
+
+    # Keep tag order stable while preventing duplicates.
+    return list(dict.fromkeys(tags))
+
+
+def _is_boundary_input(input_str: str) -> bool:
+    parts = input_str.split(".")
+    if len(parts) != 4:
+        return False
+    try:
+        octets = [int(part, 10) for part in parts]
+    except ValueError:
+        return False
+    return any(octet in {0, 1, 254, 255} for octet in octets)
 
 
 def _traceback_exception_type(traceback_text: str) -> str:
@@ -230,17 +293,40 @@ def _result_to_bitmap(result: RunResult) -> bytes:
     bitmap = bytearray(BITMAP_SIZE)
     if result.bug_type == BugType.PASS:
         return bytes(bitmap)
+    return _overlay_result_signal(bitmap, result)
 
-    key    = f"{result.bug_type}|{result.exception_msg[:128]}"
+
+def _overlay_result_signal(bitmap: bytearray, result: RunResult) -> bytes:
+    """Overlay stable fallback signals onto an existing bitmap.
+
+    This keeps behavior-hash mode and QEMU mode consistent for outcomes where
+    coverage alone is not a reliable notion of "interesting", especially for
+    crashes/timeouts and oracle-backed validity failures.
+
+    Slot allocation (to avoid collisions):
+      bytes 0-1 : behavior hash  (bug_type + exception_msg)
+      bytes 2-3 : extra slot for CRASH/TIMEOUT/VALIDITY
+      bytes 4-5 : traceback hash (bug_type + full traceback text)
+    """
+    if result.bug_type == BugType.PASS:
+        return bytes(bitmap)
+
+    key = f"{result.bug_type}|{result.exception_msg[:128]}"
     digest = hashlib.sha256(key.encode()).digest()
-    pos    = (digest[0] << 8 | digest[1]) % BITMAP_SIZE
+    pos = (digest[0] << 8 | digest[1]) % BITMAP_SIZE
     bitmap[pos] = 1
 
-    # Crashes and validity bugs get a second distinct slot so they are always
-    # flagged as interesting even if that exception message was seen before.
     if result.bug_type in (BugType.CRASH, BugType.TIMEOUT, BugType.VALIDITY):
         pos2 = (digest[2] << 8 | digest[3]) % BITMAP_SIZE
         bitmap[pos2] = 1
+
+    # Separate traceback-based slot: distinguishes bugs with the same exception
+    # message but different call stacks (e.g. same ParseException at different lines).
+    if result.traceback:
+        tb_key = f"traceback|{result.bug_type}|{result.traceback.strip()[:256]}"
+        tb_digest = hashlib.sha256(tb_key.encode()).digest()
+        tb_pos = (tb_digest[4] << 8 | tb_digest[5]) % BITMAP_SIZE
+        bitmap[tb_pos] = 1
 
     return bytes(bitmap)
 
@@ -382,7 +468,7 @@ class Executor:
                 stdout="", stderr="",
                 exception_msg="Process timed out",
             )
-            return bytes(BITMAP_SIZE), True, result
+            return _result_to_bitmap(result), True, result
 
         except Exception as exc:
             result = RunResult(
@@ -392,7 +478,7 @@ class Executor:
                 stdout="", stderr="",
                 exception_msg=str(exc),
             )
-            return bytes(BITMAP_SIZE), True, result
+            return _result_to_bitmap(result), True, result
 
         finally:
             try:
@@ -416,8 +502,12 @@ class Executor:
             exception_msg=exc_msg,
             traceback=tb,
         )
+        parser_bug_type, parser_bug_message = _parser_reported_bug(stdout)
+        result.parser_reported_bug_type = parser_bug_type
+        result.parser_reported_message = parser_bug_message
         result = self._apply_oracle(result)
-        return bytes(bitmap), result.is_crash, result
+        enriched_bitmap = _overlay_result_signal(bytearray(bitmap), result)
+        return enriched_bitmap, result.is_crash, result
 
     # ── Shared binary runner (Linux-no-AFL and Windows) ───────────────────────
 
@@ -468,6 +558,9 @@ class Executor:
             exception_msg=exc_msg,
             traceback=tb,
         )
+        parser_bug_type, parser_bug_message = _parser_reported_bug(stdout)
+        result.parser_reported_bug_type = parser_bug_type
+        result.parser_reported_message = parser_bug_message
         return self._apply_oracle(result)
 
     def _apply_oracle(self, result: RunResult) -> RunResult:
@@ -480,8 +573,26 @@ class Executor:
         exc_type = _traceback_exception_type(result.traceback)
         is_parse_rejection = exc_type.endswith("ParseException")
 
+        if result.parser_reported_bug_type == BugType.VALIDITY:
+            result.bug_type = BugType.VALIDITY
+            detail = result.parser_reported_message or result.exception_msg or "Parser reported a validity bug"
+            result.exception_msg = f"{detail} [oracle={verdict.reason}]"
+            return result
+
+        if result.parser_reported_bug_type == BugType.INVALIDITY:
+            result.bug_type = BugType.INVALIDITY
+            detail = result.parser_reported_message or result.exception_msg or "Parser reported an invalidity bug"
+            result.exception_msg = detail
+            return result
+
         if not verdict.supported:
-            result.bug_type = BugType.BONUS if observed_rejection else BugType.PASS
+            if observed_rejection:
+                result.bug_type = BugType.ORACLE_UNKNOWN_REJECT
+                detail = result.exception_msg or "Parser rejected oracle-unsupported input"
+                result.exception_msg = f"{detail} [oracle={verdict.reason}]"
+            else:
+                result.bug_type = BugType.ORACLE_UNKNOWN_ACCEPT
+                result.exception_msg = f"Oracle unsupported for accepted input ({verdict.reason})"
             return result
 
         if verdict.expected_valid is True:
@@ -509,3 +620,8 @@ class Executor:
             return result
 
         return result
+
+
+def result_taxonomy_tags(result: RunResult) -> list[str]:
+    """Return user-facing taxonomy labels for a classified run result."""
+    return _taxonomy_tags(result)

@@ -314,3 +314,61 @@ class StaticScheduler:
 
     def export_mutation_stats(self) -> dict[str, object]:
         return self.payoff_tracker.export_mutation_stats()
+
+
+class FixedScheduler:
+    """Pure static scheduler for evaluation baselines.
+
+    This mode does not learn from outcomes. It exists so ablations can cleanly
+    isolate havoc-only and semantic-plus-havoc behavior from payoff tracking
+    and DL guidance.
+    """
+
+    def __init__(
+        self,
+        format_config: dict,
+        *,
+        semantic_probability: float = 0.5,
+        guided_ratio: float = 0.0,
+    ) -> None:
+        static_weights = format_config.get("havoc_operators", {})
+        self.static_weights = MutationPayoffTracker._normalize_weights(static_weights)  # noqa: SLF001
+        self.semantic_probability = max(0.0, min(1.0, float(semantic_probability)))
+        self.guided_ratio = max(0.0, min(1.0, float(guided_ratio)))
+        self._stats = {
+            "mode": "fixed_static",
+            "semantic_probability": self.semantic_probability,
+            "guided_ratio": self.guided_ratio,
+            "operators": self.static_weights,
+        }
+
+    def get_operator_weights(self, seed: bytes) -> dict[str, float]:  # noqa: ARG002
+        return dict(self.static_weights)
+
+    def get_seed_priority(self, seed: bytes) -> float:  # noqa: ARG002
+        return 1.0
+
+    def plan_mutation(self, seed: bytes) -> dict[str, object]:  # noqa: ARG002
+        return {
+            "seed_family": "fixed_static",
+            "weights": dict(self.static_weights),
+            "semantic_probability": self.semantic_probability,
+            "guided_ratio": self.guided_ratio,
+            "preferred_fields": [],
+            "mode": "static_fixed",
+            "confidence": 0.0,
+            "blend": 0.0,
+            "reason": "fixed_baseline",
+        }
+
+    def record_mutation_outcome(
+        self,
+        plan: dict[str, object],  # noqa: ARG002
+        discovered_new_behavior: bool,  # noqa: ARG002
+        semantic_trace: dict[str, object] | None = None,  # noqa: ARG002
+        havoc_trace: dict[str, object] | None = None,  # noqa: ARG002
+    ) -> None:
+        return
+
+    def export_mutation_stats(self) -> dict[str, object]:
+        return dict(self._stats)
