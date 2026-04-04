@@ -125,7 +125,7 @@ python main.py ipv4 --time-budget 3600
 python main.py ipv6 --time-budget 3600 --havoc-iters 16
 
 # Fuzz cidrize for 1 hour
-python main.py cidrize --time-budget 3600
+python3 main.py cidrize --time-budget 3600
 
 # Fuzz the bundled JSON decoder with Atheris for 10 minutes
 python main.py json --time-budget 600
