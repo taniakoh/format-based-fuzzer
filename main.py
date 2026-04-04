@@ -4,15 +4,11 @@ Hybrid Coverage-Guided Fuzzer - Entry Point.
 Targets : IPv4/IPv6/cidrize parser binaries plus a JSON decoder target
 Stack   : Python 3.11+, three-tier mutation engine, behavior-based coverage
 
-Architecture (Phase 1 - no torch):
-  Seed generator -> Tier 1 (pass-through) -> Tier 2 (semantic) ->
-  Tier 3 (havoc, static weights) -> Executor -> Coverage -> Corpus
-
-Architecture (Phase 2 - torch available):
-  Same pipeline, but Tier 3 uses a hybrid scheduler that blends static
-  weights with DL guidance only when the model has earned trust.
-  Model is loaded from models/<target>_surrogate.pt if it exists,
-  trained every TRAIN_EVERY new behaviors, and saved after each training run.
+Binary-target evaluation modes:
+  havoc_only           -> fixed static havoc weights, Tier 2 disabled
+  semantic_plus_havoc  -> fixed static havoc weights, Tier 2 enabled
+  static_payoff        -> payoff-tracking scheduler without DL
+  hybrid_dl            -> guarded DL guidance layered on payoff tracking
 
 Usage:
     python main.py ipv4 [--havoc-iters N] [--time-budget S] [--seed RNG]
@@ -26,6 +22,7 @@ Options:
     --time-budget S   Fuzzing duration in seconds (default: 86400)
     --seed RNG        RNG seed for reproducibility (default: 42)
     --seeds-n N       Initial corpus size per target (default: 100)
+    --evaluation-mode Explicit experiment configuration (default: auto)
     --fresh-start     Clear prior results and any saved model checkpoint
 """
 
@@ -47,13 +44,40 @@ from fuzzer.format_loader import load_format
 from fuzzer.mutation.tier1_structure import StructureMutator
 from fuzzer.mutation.tier2_semantic import get_mutator
 from fuzzer.mutation.tier3_havoc import HavocMutator
-from fuzzer.scheduler import StaticScheduler
+from fuzzer.scheduler import FixedScheduler, StaticScheduler
 from fuzzer.seed_generator import get_seed_generator
 
 # Train the surrogate every N new behaviors discovered.
 # Low because each binary call is ~30 s, so corpus growth is slow.
 TRAIN_EVERY = 10
 _HERE = Path(__file__).parent
+EVALUATION_MODES = ("auto", "havoc_only", "semantic_plus_havoc", "static_payoff", "hybrid_dl")
+
+
+def _resolve_evaluation_mode(
+    requested_mode: str,
+    *,
+    disable_dl: bool,
+) -> str:
+    """Resolve the requested evaluation mode and whether DL should be used."""
+    if disable_dl and requested_mode not in ("auto", "havoc_only", "semantic_plus_havoc", "static_payoff"):
+        raise ValueError("--no-dl cannot be combined with evaluation mode 'hybrid_dl'")
+
+    if requested_mode == "havoc_only":
+        return "havoc_only"
+    if requested_mode == "semantic_plus_havoc":
+        return "semantic_plus_havoc"
+    if requested_mode == "static_payoff" or disable_dl:
+        return "static_payoff"
+    if requested_mode == "hybrid_dl":
+        return "hybrid_dl"
+
+    try:
+        import torch  # noqa: F401
+
+        return "hybrid_dl"
+    except ImportError:
+        return "static_payoff"
 
 
 def _reset_target_state(target: str) -> None:
@@ -93,6 +117,8 @@ def _run_atheris_target(
     *,
     time_budget_secs: int,
     seeds_n: int,
+    evaluation_mode_requested: str,
+    evaluation_mode_resolved: str,
 ) -> None:
     """Run an Atheris-backed target in a subprocess-managed campaign."""
     print("[*] Instrumentation: atheris")
@@ -115,6 +141,8 @@ def _run_atheris_target(
         "target": target,
         "time_budget_secs": time_budget_secs,
         "seeds_n": seeds_n,
+        "evaluation_mode_requested": evaluation_mode_requested,
+        "evaluation_mode_resolved": evaluation_mode_resolved,
         "executor_mode": "Atheris",
         "binary_path": None,
         "scheduler": "Atheris/libFuzzer",
@@ -177,6 +205,8 @@ def _run_atheris_target(
 
     stats_lines = [
         f"Target          : {target}",
+        f"Eval mode req   : {evaluation_mode_requested}",
+        f"Eval mode used  : {evaluation_mode_resolved}",
         f"Wall time       : {duration:.1f}s",
         "Total execs     : Atheris-managed (see atheris.log)",
         "Behaviors seen  : Atheris-managed (see atheris.log)",
@@ -185,7 +215,8 @@ def _run_atheris_target(
         "Bonus bugs      : N/A",
         "Invalidity count: N/A",
         f"Unique crashes  : {crash_count}",
-        "Time-to-1st-bug : Atheris-managed",
+        "Time-to-1st-interesting: Atheris-managed",
+        "Time-to-1st-real-bug: Atheris-managed",
         f"Seed corpus     : {corpus_count}",
         f"Return code     : {return_code}",
     ]
@@ -249,6 +280,7 @@ def fuzz(
     seeds_n: int = 100,
     disable_dl: bool = False,
     fresh_start: bool = False,
+    evaluation_mode: str = "auto",
 ) -> None:
     """Run the hybrid fuzzer against one target."""
 
@@ -263,6 +295,11 @@ def fuzz(
     if fresh_start:
         _reset_target_state(target)
 
+    resolved_mode = _resolve_evaluation_mode(
+        evaluation_mode,
+        disable_dl=disable_dl,
+    )
+
     phase_clock = time.perf_counter()
     fmt = load_format(target)
     print(f"[*] Format loaded : {_elapsed_ms(phase_clock):7.1f} ms")
@@ -273,6 +310,8 @@ def fuzz(
             fmt,
             time_budget_secs=time_budget_secs,
             seeds_n=seeds_n,
+            evaluation_mode_requested=evaluation_mode,
+            evaluation_mode_resolved="atheris",
         )
         return
 
@@ -305,10 +344,22 @@ def fuzz(
     checkpoint_loaded = False
     checkpoint_metadata: dict = {}
     phase_clock = time.perf_counter()
-    if disable_dl:
+    if resolved_mode == "havoc_only":
+        scheduler = FixedScheduler(fmt, semantic_probability=0.0, guided_ratio=0.0)
+        print(
+            f"[*] Scheduler     : FixedScheduler (havoc-only baseline) "
+            f"({_elapsed_ms(phase_clock):7.1f} ms)"
+        )
+    elif resolved_mode == "semantic_plus_havoc":
+        scheduler = FixedScheduler(fmt, semantic_probability=0.5, guided_ratio=0.0)
+        print(
+            f"[*] Scheduler     : FixedScheduler (semantic+havoc baseline) "
+            f"({_elapsed_ms(phase_clock):7.1f} ms)"
+        )
+    elif resolved_mode == "static_payoff":
         scheduler = StaticScheduler(fmt)
         print(
-            f"[*] Scheduler     : StaticScheduler (--no-dl) "
+            f"[*] Scheduler     : StaticScheduler (payoff-tracking) "
             f"({_elapsed_ms(phase_clock):7.1f} ms)"
         )
     else:
@@ -331,9 +382,14 @@ def fuzz(
                 f"({_elapsed_ms(phase_clock):7.1f} ms)"
             )
         except ImportError:
+            if evaluation_mode == "hybrid_dl":
+                raise RuntimeError(
+                    "evaluation mode 'hybrid_dl' requires torch to be installed"
+                ) from None
             scheduler = StaticScheduler(fmt)
+            resolved_mode = "static_payoff"
             print(
-                f"[*] Scheduler     : StaticScheduler (torch not installed) "
+                f"[*] Scheduler     : StaticScheduler (torch not installed; fell back from auto) "
                 f"({_elapsed_ms(phase_clock):7.1f} ms)"
             )
 
@@ -361,13 +417,22 @@ def fuzz(
             "time_budget_secs": time_budget_secs,
             "havoc_iters": havoc_iters,
             "seeds_n": seeds_n,
+            "evaluation_mode_requested": evaluation_mode,
+            "evaluation_mode_resolved": resolved_mode,
             "executor_mode": executor.mode,
             "binary_path": str(executor.binary),
             "scheduler": type(scheduler).__name__,
-            "scheduler_mode": "hybrid" if model is not None else "static",
+            "scheduler_mode": resolved_mode,
             "dl_enabled": model is not None,
             "checkpoint_loaded": checkpoint_loaded,
             "checkpoint_metadata": checkpoint_metadata,
+            "semantic_mutation_enabled": resolved_mode != "havoc_only",
+            "behavior_proxy_dim": getattr(model, "COV_DIM", None),
+            "behavior_proxy_note": (
+                "DL model learns a compressed behavior proxy, not the full runtime bitmap"
+                if model is not None
+                else None
+            ),
             "format_config": fmt,
         }
     )
@@ -375,11 +440,19 @@ def fuzz(
         {
             "target": target,
             "dl_enabled": model is not None,
+            "evaluation_mode_requested": evaluation_mode,
+            "evaluation_mode_resolved": resolved_mode,
             "checkpoint_loaded": checkpoint_loaded,
             "initial_metadata": initial_dl_metadata,
             "final_metadata": initial_dl_metadata,
             "training_rounds_this_run": 0,
             "latest_loss": None,
+            "behavior_proxy_dim": getattr(model, "COV_DIM", None),
+            "behavior_proxy_note": (
+                "Compressed proxy target built from observed bitmap positions represented in the model output"
+                if model is not None
+                else None
+            ),
         }
     )
 
@@ -554,11 +627,19 @@ def fuzz(
         {
             "target": target,
             "dl_enabled": model is not None,
+            "evaluation_mode_requested": evaluation_mode,
+            "evaluation_mode_resolved": resolved_mode,
             "checkpoint_loaded": checkpoint_loaded,
             "initial_metadata": initial_dl_metadata,
             "final_metadata": final_dl_metadata,
             "training_rounds_this_run": dl_training_rounds_this_run,
             "latest_loss": final_dl_metadata.get("last_training_loss"),
+            "behavior_proxy_dim": getattr(model, "COV_DIM", None),
+            "behavior_proxy_note": (
+                "Compressed proxy target built from observed bitmap positions represented in the model output"
+                if model is not None
+                else None
+            ),
         }
     )
 
@@ -608,7 +689,16 @@ def main() -> None:
     parser.add_argument(
         "--no-dl",
         action="store_true",
-        help="Force the static scheduler even if torch is installed",
+        help="Deprecated compatibility flag: forces non-DL evaluation modes",
+    )
+    parser.add_argument(
+        "--evaluation-mode",
+        choices=EVALUATION_MODES,
+        default="auto",
+        help=(
+            "Evaluation configuration: auto, havoc_only, semantic_plus_havoc, "
+            "static_payoff, or hybrid_dl (default: auto)"
+        ),
     )
     parser.add_argument(
         "--fresh-start",
@@ -628,6 +718,7 @@ def main() -> None:
             seeds_n=args.seeds_n,
             disable_dl=args.no_dl,
             fresh_start=args.fresh_start,
+            evaluation_mode=args.evaluation_mode,
         )
 
 
