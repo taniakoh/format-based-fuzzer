@@ -111,6 +111,13 @@ The plan currently includes:
 - `mode`: `static` or `guided`
 - `confidence`, `blend`, `reason`: scheduler diagnostics
 
+The main entrypoint exposes four explicit binary-target evaluation modes:
+
+- `havoc_only`: fixed static havoc weights, Tier 2 disabled
+- `semantic_plus_havoc`: fixed static havoc weights with Tier 2 enabled
+- `static_payoff`: payoff-tracking scheduler without DL
+- `hybrid_dl`: payoff tracking plus confidence-gated DL guidance
+
 ### Static mode
 
 `StaticScheduler` uses `MutationPayoffTracker` only. It adapts operator weights, semantic probability, preferred fields, and seed priority from empirical success rates.
@@ -200,9 +207,17 @@ Bug classification is derived from parser output plus process state:
 - `validity`
 - `invalidity`
 - `oracle_mismatch`
+- `oracle_unknown_accept`
+- `oracle_unknown_reject`
 - `bonus`
 - `CRASH`
 - `TIMEOUT`
+
+The oracle verdict also carries parsed-family metadata:
+
+- `shape`: the recognized input family such as `plain_ipv4`, `network`,
+  `ipv4_partial_range`, or `ipv4_wildcard_range`
+- `normalized`: an optional canonical form for accepted inputs
 
 ---
 
@@ -216,6 +231,7 @@ Coverage now depends on executor mode:
 2. In `Linux` and `Windows` fallback modes, `PASS` returns an all-zero bitmap.
 3. Otherwise, `"<bug_type>|<exception_msg[:128]>"` is SHA-256 hashed into a stable slot.
 4. `CRASH`, `TIMEOUT`, and `validity` set a second slot as well so they remain interesting even when repeated.
+5. In `QEMU` mode, those fallback signal bits are overlaid onto the AFL bitmap so crash/timeout handling stays consistent even when the raw coverage file is empty.
 
 `CoverageAnalyzer.is_interesting(bitmap)` merges that bitmap into the global run bitmap and returns `True` if any slot flipped from `0` to `1`.
 
@@ -230,7 +246,7 @@ That count is reported as `Behaviors seen`.
 Every execution is recorded:
 
 - `bugs.jsonl` gets one entry for every non-`PASS` result
-- `unique_bugs.json` tracks distinct runtime signatures derived from bug type, exit metadata, output fragments, and bitmap digest
+- `unique_bugs.json` tracks distinct real-bug signatures only
 - `crashes/` stores unique crash inputs
 - `plot_data` appends a CSV progress point
 
@@ -249,8 +265,9 @@ Additional run artifacts written by the current implementation:
 - `dl_training.jsonl`
 - `dl_summary.json`
 
-Metrics summaries now also track `oracle_mismatch` separately from `validity`,
-`bonus`, and `invalidity`.
+Metrics summaries now separate interesting results from real bugs, track
+`oracle_mismatch` separately, and report first-seen timings for interesting
+results, real bugs, and crashes independently.
 
 ---
 
@@ -278,7 +295,7 @@ Training happens:
 
 The surrogate is trained on:
 
-- a 128-dimensional binary coverage target built from observed bitmap positions `< 128`
+- a 128-dimensional compressed behavior-proxy target built from observed bitmap positions `< 128`
 - a learned confidence target derived from top-k overlap between predicted and true coverage
 
 Training combines:

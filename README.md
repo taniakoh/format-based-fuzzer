@@ -73,7 +73,9 @@ Verify CUDA is detected:
 python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
 ```
 
-> Without torch installed, or when `--no-dl` is used, the binary targets run with the static/payoff-tracking scheduler only.
+> `hybrid_dl` requires torch. The explicit evaluation modes let you run fixed
+> baselines (`havoc_only`, `semantic_plus_havoc`), payoff-tracking without DL
+> (`static_payoff`), or the guarded learned scheduler (`hybrid_dl`).
 
 ### Linux edge coverage with AFL++ QEMU - optional
 
@@ -109,7 +111,8 @@ python main.py <target> [options]
 | `--time-budget S` | int (default: `86400`) | Total fuzzing time in seconds |
 | `--seed RNG` | int (default: `42`) | RNG seed for reproducibility |
 | `--seeds-n N` | int (default: `100`) | Initial corpus size loaded at startup |
-| `--no-dl` | flag | Force the static scheduler even if torch is installed |
+| `--evaluation-mode MODE` | `auto`, `havoc_only`, `semantic_plus_havoc`, `static_payoff`, `hybrid_dl` | Explicit evaluation configuration |
+| `--no-dl` | flag | Compatibility flag that forces a non-DL mode |
 | `--fresh-start` | flag | Clear `results/<target>/` and `models/<target>_surrogate.pt` before the run |
 
 ### Examples
@@ -136,8 +139,20 @@ python main.py all --time-budget 86400
 # Reproducible run
 python main.py ipv4 --time-budget 3600 --seed 123
 
-# Force static mode even if torch is installed
-python main.py ipv4 --time-budget 3600 --no-dl
+# Pure havoc-only baseline
+python main.py ipv4 --time-budget 3600 --evaluation-mode havoc_only
+
+# Semantic mutations without payoff tracking or DL
+python main.py ipv4 --time-budget 3600 --evaluation-mode semantic_plus_havoc
+
+# Static payoff-tracking scheduler
+python main.py ipv4 --time-budget 3600 --evaluation-mode static_payoff
+
+# Hybrid DL scheduler
+python main.py ipv4 --time-budget 3600 --evaluation-mode hybrid_dl
+
+# Oracle regression checks
+python evaluation/oracle_checks.py
 
 # Start from a clean slate
 python3 main.py ipv4 --time-budget 100 --fresh-start
@@ -163,10 +178,15 @@ The scheduler now treats static behavior as a first-class policy, not a one-time
 
 That matters especially in this repository because:
 
-- coverage is hashed parser behavior, not true edge coverage
+- coverage is hashed parser behavior on fallback paths, not true edge coverage
 - the parser binaries are opaque
 - executions are slow, so training data arrives slowly
 - the model can overfit a small set of observed behaviors
+
+The model is intentionally scoped as a compressed behavior proxy rather than a
+full surrogate for the runtime bitmap. The proxy head is 128-dimensional, so
+DL guidance is best understood as a routing hint layered on top of stronger
+mutation baselines, not as a complete learned coverage objective.
 
 ### Policy
 
@@ -267,11 +287,19 @@ independent oracle:
 - `validity`: the oracle says the input should be valid, but the parser rejects it
 - `invalidity`: the oracle says the input should be invalid and the parser raises a `ParseException`
 - `oracle_mismatch`: the oracle says the input should be invalid, but the parser accepts it
-- `bonus`: unexpected exception on an oracle-invalid or oracle-unsupported input
+- `bonus`: unexpected exception on an oracle-invalid input
+- `oracle_unknown_accept`: oracle does not support the shape, parser accepted it
+- `oracle_unknown_reject`: oracle does not support the shape, parser rejected it
 - `CRASH` / `TIMEOUT`: process failure or timeout
 
 Current built-in oracles cover IPv4, IPv6, and cidrize. The JSON target uses a
 separate stdlib-JSON oracle inside the Atheris harness.
+
+The binary-target oracle now records a parsed `shape` family and optional
+`normalized` form for accepted inputs. For `cidrize`, the oracle classifies
+documented families such as networks, full ranges, partial IPv4 ranges, and
+IPv4 wildcard forms before validating them semantically, which reduces
+overfitting to the current seed examples.
 
 ---
 
@@ -291,8 +319,8 @@ All results are written to `results/<target>/`:
 | `fuzzer_stats` | Duplicate of the end-of-run text summary for AFL/Neuzz-style tooling |
 | `mutation_stats.json` | Learned payoff statistics for operators, fields, stages, and seed families |
 | `dl_training.jsonl` | One JSON record per periodic/final DL training event |
-| `dl_summary.json` | Final DL/checkpoint summary for the run |
-| `stats.txt` | Final summary printed and saved at the end of each run |
+| `dl_summary.json` | Final DL/checkpoint summary for the run, including proxy-target metadata |
+| `stats.txt` | Final summary printed and saved at the end of each run, including corrected first-seen timings |
 
 For the `json` target specifically:
 
@@ -308,6 +336,7 @@ For the `json` target specifically:
 | `bonus` | Unexpected exception raised - real bug |
 | `oracle_mismatch` | Oracle expected rejection, but the parser accepted the input - real bug |
 | `invalidity` | Expected `ParseException` on an invalid input |
+| `oracle_unknown_accept` / `oracle_unknown_reject` | Oracle cannot classify the shape; visible in logs, not counted as headline bugs |
 | `CRASH` / `TIMEOUT` | Non-zero exit code or process exceeded the executor timeout for that mode |
 
 ### Console output
@@ -345,7 +374,7 @@ the first execution where it appeared and an example triggering input.
 
 ## DL Model Checkpoints
 
-When torch is installed and DL is not disabled, the fuzzer trains a neural surrogate model on inputs that trigger new behaviors. Checkpoints are saved to `models/`:
+When torch is installed and `hybrid_dl` is active, the fuzzer trains a neural surrogate model on inputs that trigger new behaviors. Checkpoints are saved to `models/`:
 
 ```text
 models/ipv4_surrogate.pt
@@ -368,13 +397,14 @@ campaign begins.
 
 ## Ablation Configurations
 
-To evaluate which components contribute to bug-finding, run with the following setups and compare `stats.txt`:
+To evaluate which components contribute to bug-finding, run with the explicit evaluation modes and compare `stats.txt` plus `fuzzer_config`:
 
 | Config | How to run |
 |---|---|
-| Baseline (havoc only, no torch) | Uninstall torch, run normally |
-| + Semantic mutations | Install torch, run normally while relying on static priors |
-| Full Hybrid (+ DL scheduler) | Install torch, run normally and let the hybrid policy decide how much guidance to trust |
+| Havoc only | `python main.py ipv4 --evaluation-mode havoc_only ...` |
+| Semantic + Havoc | `python main.py ipv4 --evaluation-mode semantic_plus_havoc ...` |
+| Static payoff | `python main.py ipv4 --evaluation-mode static_payoff ...` |
+| Full hybrid DL | `python main.py ipv4 --evaluation-mode hybrid_dl ...` |
 
 Recommended per-config run: `--time-budget 3600` (1 hour), repeated with different `--seed` values for variance.
 
@@ -387,6 +417,6 @@ Recommended per-config run: `--time-budget 3600` (1 hour), repeated with differe
 | `--havoc-iters` | `4`, `8`, `16`, `32` |
 | `--seeds-n` | `50`, `100`, `200` |
 | `target` | `ipv4` vs `ipv6` |
-| Scheduler | Static-only vs hybrid static+DL |
+| Evaluation mode | `havoc_only`, `semantic_plus_havoc`, `static_payoff`, `hybrid_dl` |
 
-Metrics to report per configuration: `validity_bugs`, `bonus_bugs`, `behaviors_covered`, `time_to_first_bug`, `total_executions`.
+Metrics to report per configuration: `validity_bugs`, `bonus_bugs`, `oracle_mismatches`, `behaviors_covered`, `time_to_first_real_bug`, `time_to_first_interesting_result`, and `total_executions`.

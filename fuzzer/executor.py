@@ -228,15 +228,51 @@ def _taxonomy_tags(result: "RunResult") -> list[str]:
     return list(dict.fromkeys(tags))
 
 
+_IPV6_BOUNDARY_ADDRS = {
+    "::",                                              # all-zeros
+    "::1",                                             # loopback
+    "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",        # all-ones
+    "::ffff:0:0",                                      # IPv4-mapped base
+    "::ffff:ffff:ffff",                                # IPv4-mapped top
+    "fe80::",                                          # link-local base
+    "fec0::",                                          # site-local base (deprecated)
+    "ff00::",                                          # multicast base
+}
+
+_CIDR_BOUNDARY_PREFIXES = {"0", "32", "128"}
+
+
 def _is_boundary_input(input_str: str) -> bool:
+    # IPv4: boundary octets (0, 1, 254, 255)
     parts = input_str.split(".")
-    if len(parts) != 4:
-        return False
-    try:
-        octets = [int(part, 10) for part in parts]
-    except ValueError:
-        return False
-    return any(octet in {0, 1, 254, 255} for octet in octets)
+    if len(parts) == 4:
+        try:
+            octets = [int(part, 10) for part in parts]
+            if any(octet in {0, 1, 254, 255} for octet in octets):
+                return True
+        except ValueError:
+            pass
+
+    # IPv6: known boundary addresses
+    if input_str.lower() in _IPV6_BOUNDARY_ADDRS:
+        return True
+
+    # CIDR: boundary prefix lengths (/0, /32, /128) or boundary base addresses
+    if "/" in input_str:
+        base, _, prefix = input_str.partition("/")
+        if prefix.strip() in _CIDR_BOUNDARY_PREFIXES:
+            return True
+        # Base is a boundary IPv4 address
+        base_parts = base.strip().split(".")
+        if len(base_parts) == 4:
+            try:
+                base_octets = [int(p, 10) for p in base_parts]
+                if any(o in {0, 255} for o in base_octets):
+                    return True
+            except ValueError:
+                pass
+
+    return False
 
 
 def _traceback_exception_type(traceback_text: str) -> str:
@@ -580,6 +616,16 @@ class Executor:
             return result
 
         if result.parser_reported_bug_type == BugType.INVALIDITY:
+            # Oracle cross-check: if the oracle considers this input valid, the
+            # parser is wrongly rejecting it → reclassify as a ValidityBug.
+            if verdict.supported and verdict.expected_valid is True:
+                result.bug_type = BugType.VALIDITY
+                detail = (
+                    result.parser_reported_message
+                    or "Parser reported invalidity but oracle considers input valid"
+                )
+                result.exception_msg = f"{detail} [oracle={verdict.reason}]"
+                return result
             result.bug_type = BugType.INVALIDITY
             detail = result.parser_reported_message or result.exception_msg or "Parser reported an invalidity bug"
             result.exception_msg = detail

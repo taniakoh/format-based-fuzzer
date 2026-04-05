@@ -82,3 +82,51 @@ Reasons:
 
 Key files changed:
 - `evaluation/collect_metrics.py`
+## 2026-04-05
+
+### Correct bug timing and oracle-unknown reporting
+Improvements:
+- Split interesting-result timing from real-bug timing so expected `invalidity` results no longer populate the first-bug metric.
+- Added explicit `oracle_unknown_accept` and `oracle_unknown_reject` classifications so unsupported oracle shapes remain visible without being counted as headline bugs.
+- Normalized crash/timeout interestingness across executor modes by overlaying stable fallback result signals on top of the runtime bitmap.
+
+Reasons:
+- Fixes misleading evaluation metrics and removes silent classification gaps.
+- Keeps crash and timeout discovery behavior consistent between behavior-hash and QEMU execution modes.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
+- `fuzzer/executor.py`
+- `PIPELINE.md`
+
+## 2026-04-05
+
+### Reduce oracle unknowns for documented cidrize families
+Improvements:
+- Reclassified malformed-but-recognizable `cidrize` inputs as invalid supported families instead of letting them fall through to oracle-unknown handling.
+- Added structured wildcard and partial-range validation so those families are judged generically rather than by test-case-shaped regexes.
+- Stored richer oracle metadata in bug artifacts so shape and normalization context survive after the run.
+
+Reasons:
+- Keeps `oracle_unknown_*` focused on truly unmodeled inputs instead of documented families with bad syntax.
+- Improves the signal quality of bug classification and post-run debugging.
+
+Key files changed:
+- `fuzzer/oracle.py`
+- `evaluation/collect_metrics.py`
+
+## 2026-04-05
+
+### Use parser stdout as the primary bug classifier
+Improvements:
+- Parsed the IPv4 parser's stdout bug markers so executor classification now trusts `validity` and `invalidity` messages emitted by the subject binary.
+- Fell back to stderr traceback text when the parser prints an empty stdout traceback block, which fixes prior mislabeling as `oracle_mismatch` or `PASS`.
+- Added taxonomy metadata plus `unique_findings.json` so parser-reported findings can be matched directly to presentation labels such as `ValidityBug`, `InvalidityBug`, and `BoundaryBug`.
+
+Reasons:
+- Keeps saved bug artifacts aligned with the parser's own declared bug families instead of inferring everything from oracle heuristics.
+- Makes it practical to map findings to the project bug taxonomy without hand-auditing stdout after each run.
+
+Key files changed:
+- `fuzzer/executor.py`
+- `evaluation/collect_metrics.py`

@@ -2,6 +2,47 @@
 
 ## WSL (Ubuntu 24.04)
 
+## Quick Start For Each Session
+
+Use this when you are starting fresh and just want to get into the project quickly.
+
+### From Windows PowerShell
+
+Open WSL:
+
+```powershell
+wsl -d Ubuntu-24.04
+```
+
+### Inside WSL
+
+Go to the project:
+
+```bash
+cd /mnt/c/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer
+```
+
+Activate the virtual environment:
+
+```bash
+source ~/fuzzer-venv/bin/activate
+```
+
+Check that it worked:
+
+```bash
+which python3
+python3 --version
+```
+
+If the venv is active, the Python path should point to `~/fuzzer-venv/bin/python3`.
+
+### Optional: run the fuzzer
+
+```bash
+python3 main.py ipv4 --time-budget 300 --fresh-start
+```
+
 ### Prerequisites
 
 Ensure you are running Ubuntu 24.04 in WSL. To set it as default from PowerShell:
@@ -37,8 +78,20 @@ pip install torch --index-url https://download.pytorch.org/whl/cu124
 
 ### Activate venv (each session)
 ```bash
-source ~/fuzzer-venv/bin/activate
 cd /mnt/c/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer
+source ~/fuzzer-venv/bin/activate
+```
+
+### Full startup sequence (copy/paste)
+
+```powershell
+wsl -d Ubuntu-24.04
+```
+
+```bash
+cd /mnt/c/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer
+source ~/fuzzer-venv/bin/activate
+python3 --version
 ```
 
 ### Run the fuzzer

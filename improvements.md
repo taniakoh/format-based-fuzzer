@@ -271,3 +271,64 @@ Reasons:
 
 Key files changed:
 - `fuzzer/json_atheris_harness.py`
+## 2026-04-05
+
+### Clarify WSL and venv session startup steps
+Improvements:
+- Expanded `setup.md` with a dedicated quick-start section for opening WSL, changing into the project directory, and activating the Linux virtual environment each session.
+- Added a copy-paste startup sequence and a simple verification step so the recurring workflow is easier to follow without rereading the full setup guide.
+
+Reasons:
+- The original setup guide focused more on one-time environment creation than on the repeated “start working” steps.
+- A short per-session checklist reduces friction and makes it easier to resume work consistently.
+
+Key files changed:
+- `setup.md`
+- `improvements.md`
+
+### Add explicit evaluation modes and honest DL metadata
+Improvements:
+- Added explicit evaluation modes for `havoc_only`, `semantic_plus_havoc`, `static_payoff`, and `hybrid_dl` so ablation runs no longer depend on whether torch happens to be installed.
+- Added a fixed-policy scheduler for clean baselines and persisted the requested/resolved evaluation mode in run artifacts and stats output.
+- Updated the DL summary/config output to describe the model as a compressed behavior proxy instead of implying it learns the full runtime bitmap.
+
+Reasons:
+- Makes experimental comparisons reproducible and interpretable across machines.
+- Keeps the evaluation story aligned with what the scheduler and surrogate actually do.
+
+Key files changed:
+- `main.py`
+- `fuzzer/scheduler.py`
+- `README.md`
+
+## 2026-04-05
+
+### Generalize cidrize oracle by parsed shape
+Improvements:
+- Replaced the old branch-order `cidrize` oracle with a shape-first parser plus semantic validators for networks, full ranges, partial IPv4 ranges, and IPv4 wildcard forms.
+- Added `shape` and optional `normalized` metadata to `OracleVerdict` so run artifacts can explain what family the oracle recognized.
+- Added `evaluation/oracle_checks.py` with family-based regression checks to exercise the oracle beyond the hand-written seed examples.
+
+Reasons:
+- Reduces overfitting to the current test cases and makes the oracle judge whole grammar families instead of a few literal patterns.
+- Makes oracle decisions easier to inspect when a fuzz run produces unexpected classifications.
+
+Key files changed:
+- `fuzzer/oracle.py`
+- `evaluation/oracle_checks.py`
+- `README.md`
+
+## 2026-04-05
+
+### Add bug coverage summary by taxonomy
+Improvements:
+- Added `bug_coverage_summary.json` to aggregate total and unique finding counts by internal bug type, parser-reported bug type, and presentation taxonomy tag.
+- Extended `stats.txt` with compact taxonomy total/unique rollups so runs can be compared quickly without opening JSON artifacts.
+- Kept `unique_findings.json` as the per-finding detail view while the new summary file provides the run-level coverage map.
+
+Reasons:
+- Makes it easy to answer questions like "how many `InvalidityBug` findings did we see?" and "how many were unique?" directly from run artifacts.
+- Gives bug coverage visibility that matches the presentation taxonomy instead of only the executor's internal labels.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
