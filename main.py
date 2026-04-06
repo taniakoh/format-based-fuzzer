@@ -27,6 +27,7 @@ Options:
 """
 
 import argparse
+import concurrent.futures
 import json
 import os
 import random
@@ -730,6 +731,12 @@ def fuzz(
     )
 
 
+def _fuzz_worker(kwargs: dict) -> None:
+    """Top-level worker so ProcessPoolExecutor can pickle it on Windows."""
+    random.seed(kwargs.pop("rng_seed"))
+    fuzz(**kwargs)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Hybrid Coverage-Guided Format Fuzzer")
     parser.add_argument(
@@ -815,21 +822,33 @@ def main() -> None:
 
     random.seed(args.seed)
 
-    targets = ["ipv4", "ipv6", "cidrize"] if args.target == "all" else [args.target]
-    for current_target in targets:
-        fuzz(
-            target=current_target,
-            havoc_iters=args.havoc_iters,
-            time_budget_secs=args.time_budget,
-            seeds_n=args.seeds_n,
-            disable_dl=args.no_dl,
-            fresh_start=args.fresh_start,
-            evaluation_mode=args.evaluation_mode,
-            no_gradient_guidance=args.no_gradient_guidance,
-            no_retrain=args.no_retrain,
-            fixed_lr=args.fixed_lr,
-            no_qemu=args.no_qemu,
-        )
+    fuzz_kwargs = dict(
+        havoc_iters=args.havoc_iters,
+        time_budget_secs=args.time_budget,
+        seeds_n=args.seeds_n,
+        disable_dl=args.no_dl,
+        fresh_start=args.fresh_start,
+        evaluation_mode=args.evaluation_mode,
+        no_gradient_guidance=args.no_gradient_guidance,
+        no_retrain=args.no_retrain,
+        fixed_lr=args.fixed_lr,
+        no_qemu=args.no_qemu,
+    )
+
+    if args.target == "all":
+        targets = ["ipv4", "ipv6", "cidrize"]
+        print(f"[*] Running {len(targets)} targets in parallel: {targets}")
+        worker_kwargs = [{"target": t, "rng_seed": args.seed, **fuzz_kwargs} for t in targets]
+        with concurrent.futures.ProcessPoolExecutor(max_workers=len(targets)) as pool:
+            futures = {pool.submit(_fuzz_worker, kw): kw["target"] for kw in worker_kwargs}
+            for fut in concurrent.futures.as_completed(futures):
+                target_name = futures[fut]
+                try:
+                    fut.result()
+                except Exception as exc:
+                    print(f"[ERROR] Target {target_name} failed: {exc}")
+    else:
+        fuzz(target=args.target, **fuzz_kwargs)
 
 
 if __name__ == "__main__":

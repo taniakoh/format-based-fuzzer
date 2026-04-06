@@ -403,6 +403,12 @@ class Executor:
     def __init__(self, target: str, timeout_seconds: int | None = None, use_qemu: bool = True):
         self.target = target
 
+        # Each target gets its own cwd so the binary's logs/ output lands in
+        # results/<target>/logs/ rather than the shared project root logs/.
+        _HERE = Path(__file__).parent.parent
+        self._cwd = _HERE / "results" / target
+        self._cwd.mkdir(parents=True, exist_ok=True)
+
         # ── Select binary and mode ────────────────────────────────────────────
         linux_bin = _LINUX_BINARIES.get(target)
         win_bin   = _WINDOWS_BINARIES.get(target)
@@ -498,6 +504,7 @@ class Executor:
                 text=True,
                 errors="replace",
                 timeout=self.timeout + 5,   # outer Python timeout > inner AFL timeout
+                cwd=self._cwd,
             )
             stdout = proc.stdout or ""
             stderr = proc.stderr or ""
@@ -588,6 +595,7 @@ class Executor:
                 text=True,
                 errors="replace",
                 timeout=self.timeout,
+                cwd=self._cwd,
             )
         except subprocess.TimeoutExpired:
             return RunResult(

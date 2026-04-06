@@ -18,3 +18,5 @@ corpus/
 logs/
 models/
 results/
+*_extracted/
+savedruns/
