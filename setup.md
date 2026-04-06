@@ -56,6 +56,22 @@ sudo apt update
 sudo apt install python3-full python3-venv -y
 ```
 
+### Install AFL++ (for QEMU instrumentation)
+
+AFL++ provides `afl-showmap`, which upgrades the fuzzer from behavior-hash mode to real edge-coverage mode for the IPv4/IPv6/cidrize targets.
+
+```bash
+sudo apt install afl++ -y
+```
+
+Verify it installed:
+```bash
+which afl-showmap
+afl-showmap --help 2>&1 | head -5
+```
+
+Once installed, the fuzzer will automatically use QEMU mode — you'll see `[*] Executor mode : QEMU` at startup instead of `Linux`.
+
 ### Create venv
 
 The project directory is on `/mnt/c` (NTFS), which does not support the permissions required for a venv. Create it in your Linux home directory instead:
@@ -98,3 +114,25 @@ python3 --version
 ```bash
 python3 main.py ipv4 --time-budget 300 --fresh-start
 ```
+
+## Performance: Copy Linux Binaries to Native WSL Storage
+
+The parser binaries live on `/mnt/c` (NTFS), which is accessed through WSL's DrvFs layer. Each fuzzing run reads a ~56 MB PyInstaller bundle from the Windows filesystem — this cross-filesystem I/O is significantly slower than native Linux paths.
+
+**One-time setup** (do this once per WSL install):
+
+```bash
+cp /mnt/c/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/ipv4ipv6/linux-ipv4-parser ~/linux-ipv4-parser
+cp /mnt/c/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/ipv4ipv6/linux-ipv6-parser ~/linux-ipv6-parser
+chmod +x ~/linux-ipv4-parser ~/linux-ipv6-parser
+```
+
+Then tell the fuzzer to use the native copies by setting `FUZZER_LINUX_IPV4` and `FUZZER_LINUX_IPV6` (if supported), or by passing the paths at runtime:
+
+```bash
+LINUX_IPV4=~/linux-ipv4-parser LINUX_IPV6=~/linux-ipv6-parser python3 main.py ipv4 --time-budget 300
+```
+
+If `main.py` does not yet read those env vars, you can register the paths directly in a one-liner before the main loop, or add `"binary_linux": "/home/<user>/linux-ipv4-parser"` to `config/ipv4_format.json`.
+
+> **Why this matters:** WSL2 cross-filesystem calls (Windows ↔ Linux) go through a translation layer. For large binaries that are re-read on every subprocess spawn, this adds measurable latency per execution compared to binaries stored under `~/` on the native ext4 filesystem.

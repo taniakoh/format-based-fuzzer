@@ -85,6 +85,7 @@ def _taxonomy_payload(result) -> dict[str, object]:
 class FuzzMetrics:
     target: str
     behaviors_covered: int = 0
+    pass_count: int = 0
     unique_bug_count: int = 0
     traceback_unique_bugs: int = 0
     interesting_result_count: int = 0
@@ -132,6 +133,8 @@ class MetricsCollector:
         self._plot_path = self._out / "plot_data"
         self._dl_training_path = self._out / "dl_training.jsonl"
         self._dl_summary_path = self._out / "dl_summary.json"
+        self._energy_log_path = self._out / "energy_log.csv"
+        self._oracle_log_path = self._out / "oracle_log.csv"
         with open(self._plot_path, "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -142,6 +145,10 @@ class MetricsCollector:
                 "unique_bugs",
                 "unique_crashes",
             ])
+        with open(self._energy_log_path, "w", encoding="utf-8", newline="") as f:
+            csv.writer(f).writerow(["relative_time_sec", "seed_id", "energy"])
+        with open(self._oracle_log_path, "w", encoding="utf-8", newline="") as f:
+            csv.writer(f).writerow(["relative_time_sec", "input_hash", "is_new_behavior", "bug_label", "latency_ms"])
         self._dl_training_path.write_text("", encoding="utf-8")
         self._write_dl_summary(
             {
@@ -186,6 +193,7 @@ class MetricsCollector:
 
         from fuzzer.executor import BugType
         if result.bug_type == BugType.PASS:
+            self.metrics.pass_count += 1
             return
 
         self.metrics.interesting_result_count += 1
@@ -308,6 +316,34 @@ class MetricsCollector:
                 self.metrics.unique_crashes,
             ])
 
+    def record_energy(self, seed: bytes, energy: float) -> None:
+        """Append one seed-energy sample to energy_log.csv (logged every cycle)."""
+        seed_id = hashlib.sha256(seed).hexdigest()[:12]
+        with open(self._energy_log_path, "a", encoding="utf-8", newline="") as f:
+            csv.writer(f).writerow([
+                f"{time.time() - self._start:.3f}",
+                seed_id,
+                f"{energy:.6f}",
+            ])
+
+    def record_oracle_log(
+        self,
+        input_data: bytes,
+        bug_type,
+        is_new_behavior: bool,
+        latency_ms: float,
+    ) -> None:
+        """Append one oracle verdict to oracle_log.csv (logged every execution)."""
+        input_hash = hashlib.sha256(input_data).hexdigest()[:12]
+        with open(self._oracle_log_path, "a", encoding="utf-8", newline="") as f:
+            csv.writer(f).writerow([
+                f"{time.time() - self._start:.3f}",
+                input_hash,
+                int(is_new_behavior),
+                str(bug_type),
+                f"{latency_ms:.2f}",
+            ])
+
     def update_coverage(self, behaviors_covered: int) -> None:
         self.metrics.behaviors_covered = behaviors_covered
 
@@ -371,6 +407,19 @@ class MetricsCollector:
             encoding="utf-8",
         )
 
+    def _last_corpus_size(self) -> int | None:
+        """Return the corpus_size from the last row of plot_data, or None."""
+        try:
+            with open(self._plot_path, "r", encoding="utf-8", newline="") as f:
+                last_row = None
+                for row in csv.DictReader(f):
+                    last_row = row
+            if last_row is not None:
+                return int(float(last_row["corpus_size"]))
+        except Exception:
+            pass
+        return None
+
     def _write_bug_coverage_summary(self) -> None:
         finding_entries = list(self._unique_finding_entries.values())
         total_by_bug_type = Counter()
@@ -403,8 +452,19 @@ class MetricsCollector:
             for tag in classification.get("taxonomy_tags", []):
                 unique_by_tag[str(tag)] += 1
 
+        wall_time = self.metrics.wall_time_secs
+        total_execs = self.metrics.total_executions
         payload = {
             "target": self.target,
+            "run_scalars": {
+                "wall_time_secs": round(wall_time, 1),
+                "total_executions": total_execs,
+                "execs_per_sec": round(total_execs / max(1.0, wall_time), 4),
+                "pass_count": self.metrics.pass_count,
+                "pass_rate": round(self.metrics.pass_count / max(1, total_execs), 4),
+                "behaviors_seen": self.metrics.behaviors_covered,
+                "corpus_size": self._last_corpus_size(),
+            },
             "totals": {
                 "interesting_results": self.metrics.interesting_result_count,
                 "unique_findings": len(finding_entries),
@@ -438,12 +498,16 @@ class MetricsCollector:
 
     def _write_stats(self) -> None:
         m = self.metrics
+        execs_per_sec = m.total_executions / max(1.0, m.wall_time_secs)
+        pass_rate = m.pass_count / max(1, m.total_executions)
         lines = [
             f"Target          : {m.target}",
             f"Eval mode req   : {self._run_metadata.get('evaluation_mode_requested', 'N/A')}",
             f"Eval mode used  : {self._run_metadata.get('evaluation_mode_resolved', 'N/A')}",
             f"Wall time       : {m.wall_time_secs:.1f}s",
             f"Total execs     : {m.total_executions}",
+            f"Execs/sec       : {execs_per_sec:.4f}",
+            f"Pass (clean)    : {m.pass_count} ({pass_rate:.1%})",
             f"Behaviors seen  : {m.behaviors_covered}",
             f"Interesting results: {m.interesting_result_count}",
             f"Unique bugs     : {m.unique_bug_count}",

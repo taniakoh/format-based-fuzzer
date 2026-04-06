@@ -41,7 +41,7 @@ try:
         Output : predicted coverage (COV_DIM sigmoid values) + confidence scalar
         """
 
-        MAX_LEN = 256
+        MAX_LEN = 64
         COV_DIM = 128
 
         def __init__(self):
@@ -76,9 +76,9 @@ try:
 
         if device is None:
             device = get_device()
+        from dl.trainer import _normalize_seed
         max_len = CoverageSurrogate.MAX_LEN
-        padded = list(seed[:max_len]) + [0] * (max_len - len(seed))
-        x = torch.tensor([padded], dtype=torch.long, device=device)
+        x = torch.tensor([_normalize_seed(seed, max_len)], dtype=torch.long, device=device)
 
         embed = model.embed(x).float()
         embed.retain_grad()
@@ -218,10 +218,10 @@ class DLScheduler:
 
     def _encode(self, seed: bytes):
         import torch
+        from dl.trainer import _normalize_seed
 
         max_len = CoverageSurrogate.MAX_LEN
-        padded = list(seed[:max_len]) + [0] * (max_len - len(seed))
-        return torch.tensor([padded], dtype=torch.long, device=self.device)
+        return torch.tensor([_normalize_seed(seed, max_len)], dtype=torch.long, device=self.device)
 
     def _make_static_plan(self, seed: bytes) -> dict[str, object]:
         plan = self.payoff_tracker.plan(seed, base_blend=1.0)

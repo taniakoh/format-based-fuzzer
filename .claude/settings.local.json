@@ -10,7 +10,28 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:arxiv.org)",
-      "Bash(python -c \"import sys,json; [print\\(json.dumps\\(json.loads\\(l\\), indent=2\\)\\) for l in sys.stdin]\")"
+      "Bash(python -c \"import sys,json; [print\\(json.dumps\\(json.loads\\(l\\), indent=2\\)\\) for l in sys.stdin]\")",
+      "Bash(python -c \"import sys,json; [print\\(json.dumps\\({k:v for k,v in json.loads\\(l\\).items\\(\\) if k in ['bug_type','input','exception_msg','oracle']}, indent=2\\)\\) for l in sys.stdin if l.strip\\(\\)]\")",
+      "Bash(python test_driver.py ipv4 \"255.255.255.255\")",
+      "Bash(python test_driver.py ipv4 \"01.02.03.04\")",
+      "Bash(python test_driver.py ipv4 \"0.0.0.0\")",
+      "Bash(python test_driver.py ipv4 \"127.0.0.1\")",
+      "Bash(python -c ':*)",
+      "Bash(python evaluation/plot_progress.py savedruns/plot_data --output savedruns/progress.svg)",
+      "Bash(wsl python3:*)",
+      "Bash(wsl which:*)",
+      "Bash(wsl:*)",
+      "Bash(python3:*)",
+      "Read(//mnt/c/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/results/**)",
+      "Read(//mnt/c/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/**)",
+      "Bash(python pyinstxtractor.py ipv4ipv6/linux-ipv6-parser)",
+      "Bash(grep -v \"^'    @\\\\|^'    \\\\$\\\\|rtype\\\\|param\\\\|type s\\\\|return\\\\|pyparsing\\\\|spark\\\\|xdis\\\\|setuptools\\\\|click\\\\|six\\\\b\")",
+      "Bash(pip show:*)",
+      "Bash(python -c \"import decompile; print\\('decompile3 ok'\\)\")",
+      "Bash(python -c \"import uncompyle6; print\\('uncompyle6 ok'\\)\")",
+      "Bash(python -m decompyle3 linux-ipv4-parser_extracted/ipv4_parser_stv.pyc)",
+      "Bash(python -c \"import decompile3\")",
+      "Bash(python:*)"
     ]
   }
 }

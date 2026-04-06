@@ -49,7 +49,7 @@ from fuzzer.seed_generator import get_seed_generator
 
 # Train the surrogate every N new behaviors discovered.
 # Low because each binary call is ~30 s, so corpus growth is slow.
-TRAIN_EVERY = 10
+TRAIN_EVERY = 2
 _HERE = Path(__file__).parent
 EVALUATION_MODES = ("auto", "havoc_only", "semantic_plus_havoc", "static_payoff", "hybrid_dl")
 
@@ -281,6 +281,10 @@ def fuzz(
     disable_dl: bool = False,
     fresh_start: bool = False,
     evaluation_mode: str = "auto",
+    no_gradient_guidance: bool = False,
+    no_retrain: bool = False,
+    fixed_lr: bool = False,
+    no_qemu: bool = False,
 ) -> None:
     """Run the hybrid fuzzer against one target."""
 
@@ -398,7 +402,7 @@ def fuzz(
     print(f"[*] Havoc primed  : {_elapsed_ms(phase_clock):7.1f} ms")
 
     phase_clock = time.perf_counter()
-    executor = Executor(target)
+    executor = Executor(target, use_qemu=not no_qemu)
     coverage = CoverageAnalyzer()
     metrics = MetricsCollector(target)
 
@@ -427,6 +431,7 @@ def fuzz(
             "checkpoint_loaded": checkpoint_loaded,
             "checkpoint_metadata": checkpoint_metadata,
             "semantic_mutation_enabled": resolved_mode != "havoc_only",
+            "gradient_guidance_enabled": not no_gradient_guidance,
             "behavior_proxy_dim": getattr(model, "COV_DIM", None),
             "behavior_proxy_note": (
                 "DL model learns a compressed behavior proxy, not the full runtime bitmap"
@@ -463,38 +468,60 @@ def fuzz(
     start = time.time()
     exec_count = 0
 
+    # Stagnation tracking
+    execs_since_last_new_behavior = 0
+    execs_since_last_new_bug      = 0
+    last_unique_bug_count         = 0
+    avg_exec_time_ms              = 5000  # rough initial estimate, updated each exec
+    _STAGNATION_WARN     = 100   # print a status line every N execs without new behavior
+    _STAGNATION_STOP     = 200   # suggest stopping after this many execs without new behavior
+    _BUG_STAGNATION_STOP = 500   # suggest stopping after this many execs without a new unique bug
+
     while time.time() - start < time_budget_secs:
         seed = corpus.select(priority_fn=scheduler.get_seed_priority)
+        metrics.record_energy(seed, scheduler.get_seed_priority(seed))
 
-        mutated = tier1.mutate(seed)
         plan = scheduler.plan_mutation(seed)
-        hot_bytes = getattr(scheduler, "get_hot_bytes", lambda current_seed: [])(mutated)
+        hot_bytes = (
+            []
+            if no_gradient_guidance
+            else getattr(scheduler, "get_hot_bytes", lambda current_seed: [])(seed)
+        )
 
+        # 10% of the time run the seed unmodified (all tiers skipped) so valid
+        # inputs like 255.255.255.255 reach the parser intact.
         semantic_trace = {"applied": False}
-        if random.random() < float(plan.get("semantic_probability", 0.5)):
-            mutated = tier2.mutate(
-                mutated,
-                hot_bytes=hot_bytes,
-                preferred_fields=plan.get("preferred_fields"),
+        pass_through = random.random() < 0.20
+        if pass_through:
+            mutated = seed
+            havoc_trace = {"applied": False}
+        else:
+            mutated = tier1.mutate(seed)
+
+            if random.random() < float(plan.get("semantic_probability", 0.5)):
+                mutated = tier2.mutate(
+                    mutated,
+                    hot_bytes=hot_bytes,
+                    preferred_fields=plan.get("preferred_fields"),
+                )
+                semantic_trace = tier2.consume_last_trace()
+
+            semantic_spans = tier2.get_semantic_spans(mutated)
+            preferred_indices, field_lookup = _preferred_index_map(
+                semantic_spans,
+                plan.get("preferred_fields"),
             )
-            semantic_trace = tier2.consume_last_trace()
 
-        semantic_spans = tier2.get_semantic_spans(mutated)
-        preferred_indices, field_lookup = _preferred_index_map(
-            semantic_spans,
-            plan.get("preferred_fields"),
-        )
-
-        tier3 = HavocMutator(plan["weights"])
-        mutated = tier3.mutate(
-            mutated,
-            iterations=havoc_iters,
-            hot_bytes=hot_bytes,
-            preferred_indices=preferred_indices,
-            field_lookup=field_lookup,
-            guided_ratio=float(plan.get("guided_ratio", 0.7)),
-        )
-        havoc_trace = tier3.consume_last_trace()
+            tier3 = HavocMutator(plan["weights"])
+            mutated = tier3.mutate(
+                mutated,
+                iterations=havoc_iters,
+                hot_bytes=hot_bytes,
+                preferred_indices=preferred_indices,
+                field_lookup=field_lookup,
+                guided_ratio=0.0 if no_gradient_guidance else float(plan.get("guided_ratio", 0.7)),
+            )
+            havoc_trace = tier3.consume_last_trace()
 
         execution_clock = time.perf_counter()
         if exec_count == 0:
@@ -502,6 +529,7 @@ def fuzz(
         bitmap, crashed, result = executor.run(mutated)
         execution_ms = _elapsed_ms(execution_clock)
         exec_count += 1
+        avg_exec_time_ms = avg_exec_time_ms * 0.95 + execution_ms * 0.05
 
         if exec_count == 1:
             print(
@@ -517,6 +545,7 @@ def fuzz(
         metrics.record_execution(mutated, result, bitmap)
 
         is_new = coverage.is_interesting(bitmap)
+        metrics.record_oracle_log(mutated, result.bug_type, is_new, execution_ms)
         corpus.record_result(seed, is_new)
         if hasattr(scheduler, "record_mutation_outcome"):
             scheduler.record_mutation_outcome(
@@ -524,6 +553,41 @@ def fuzz(
                 discovered_new_behavior=is_new,
                 semantic_trace=semantic_trace,
                 havoc_trace=havoc_trace,
+            )
+
+        # Track stagnation
+        current_unique_bugs = metrics.metrics.unique_bug_count
+        if is_new:
+            execs_since_last_new_behavior = 0
+        else:
+            execs_since_last_new_behavior += 1
+
+        if current_unique_bugs > last_unique_bug_count:
+            execs_since_last_new_bug = 0
+            last_unique_bug_count = current_unique_bugs
+        else:
+            execs_since_last_new_bug += 1
+
+        if execs_since_last_new_behavior > 0 and execs_since_last_new_behavior % _STAGNATION_WARN == 0:
+            elapsed = time.time() - start
+            print(
+                f"[STAGNANT] execs={exec_count:>6} "
+                f"no_new_behavior={execs_since_last_new_behavior:>5} execs  "
+                f"no_new_bug={execs_since_last_new_bug:>5} execs  "
+                f"unique_bugs={current_unique_bugs}  "
+                f"elapsed={elapsed:.0f}s"
+            )
+            if execs_since_last_new_behavior >= _STAGNATION_STOP:
+                print(
+                    f"[CONVERGED] No new behaviors in {execs_since_last_new_behavior} executions "
+                    f"and no new bugs in {execs_since_last_new_bug} executions. "
+                    f"Coverage likely saturated — consider stopping."
+                )
+        if execs_since_last_new_bug >= _BUG_STAGNATION_STOP and execs_since_last_new_bug % _STAGNATION_WARN == 0:
+            print(
+                f"[BUG_STAGNANT] No new unique bugs in {execs_since_last_new_bug} executions "
+                f"({execs_since_last_new_bug * avg_exec_time_ms / 60000:.1f} min)  "
+                f"unique_bugs={current_unique_bugs} — likely found all reachable bugs."
             )
 
         if is_new:
@@ -540,8 +604,13 @@ def fuzz(
             training_buffer.append((mutated, positions))
             behaviors_since_last_train += 1
 
-            if model is not None and behaviors_since_last_train >= TRAIN_EVERY:
-                print(f"[DL] Training on {len(training_buffer)} samples...")
+            if model is not None and not no_retrain and behaviors_since_last_train >= TRAIN_EVERY:
+                from dl.trainer import compute_misprediction_rate
+                recent_samples = training_buffer[-TRAIN_EVERY:]
+                misprediction_rate = compute_misprediction_rate(
+                    model, recent_samples, scheduler.device
+                )
+                print(f"[DL] Training on {len(training_buffer)} samples... (misprediction_rate={misprediction_rate:.3f})")
                 training_started_at = time.time()
                 loss = train(
                     model,
@@ -549,6 +618,7 @@ def fuzz(
                     epochs=5,
                     device=scheduler.device,
                     optimizer=model._optimizer,
+                    fixed_lr=fixed_lr,
                 )
                 scheduler.record_training(len(training_buffer), loss)
                 dl_training_rounds_this_run += 1
@@ -563,6 +633,7 @@ def fuzz(
                         "buffer_size": len(training_buffer),
                         "behaviors_seen": coverage.edge_count,
                         "loss": loss,
+                        "misprediction_rate": misprediction_rate,
                         "device": getattr(scheduler, "device", None),
                         "metadata": current_metadata,
                     }
@@ -584,8 +655,12 @@ def fuzz(
 
         metrics.record_plot_point(len(corpus))
 
-    if model is not None and training_buffer:
-        print(f"[DL] Final training on {len(training_buffer)} samples...")
+    if model is not None and not no_retrain and training_buffer:
+        from dl.trainer import compute_misprediction_rate
+        misprediction_rate = compute_misprediction_rate(
+            model, training_buffer[-TRAIN_EVERY:], scheduler.device
+        )
+        print(f"[DL] Final training on {len(training_buffer)} samples... (misprediction_rate={misprediction_rate:.3f})")
         training_started_at = time.time()
         loss = train(
             model,
@@ -593,6 +668,7 @@ def fuzz(
             epochs=5,
             device=scheduler.device,
             optimizer=model._optimizer,
+            fixed_lr=fixed_lr,
         )
         scheduler.record_training(len(training_buffer), loss)
         dl_training_rounds_this_run += 1
@@ -607,6 +683,7 @@ def fuzz(
                 "buffer_size": len(training_buffer),
                 "behaviors_seen": coverage.edge_count,
                 "loss": loss,
+                "misprediction_rate": misprediction_rate,
                 "device": getattr(scheduler, "device", None),
                 "metadata": current_metadata,
             }
@@ -705,6 +782,35 @@ def main() -> None:
         action="store_true",
         help="Clear results/<target> and models/<target>_surrogate.pt before the run",
     )
+    parser.add_argument(
+        "--no-gradient-guidance",
+        action="store_true",
+        help=(
+            "Disable gradient-guided hot-byte selection and set guided_ratio=0.0 "
+            "while keeping the DL model active for operator-weight learning"
+        ),
+    )
+    parser.add_argument(
+        "--no-retrain",
+        action="store_true",
+        help=(
+            "Ablation A4: disable incremental surrogate retraining; "
+            "the model is used as-is from the cold-start checkpoint only"
+        ),
+    )
+    parser.add_argument(
+        "--fixed-lr",
+        action="store_true",
+        help=(
+            "Ablation A5: replace cosine decay with restarts with a fixed "
+            "learning rate (1e-3) during surrogate training"
+        ),
+    )
+    parser.add_argument(
+        "--no-qemu",
+        action="store_true",
+        help="Disable QEMU mode and use Linux behavior-hash mode instead",
+    )
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -719,6 +825,10 @@ def main() -> None:
             disable_dl=args.no_dl,
             fresh_start=args.fresh_start,
             evaluation_mode=args.evaluation_mode,
+            no_gradient_guidance=args.no_gradient_guidance,
+            no_retrain=args.no_retrain,
+            fixed_lr=args.fixed_lr,
+            no_qemu=args.no_qemu,
         )
 
 

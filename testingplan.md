@@ -82,7 +82,6 @@ The DL scheduler assigns a mutation energy `e(s)` to each seed `s`, controlling 
 
 **Goal:** Maximise surrogate accuracy while minimising time spent in training (leaving more budget for execution).
 
-- Use **early stopping** with a 10% validation split: halt retraining when validation loss has not improved for `p = 5` epochs
 - Use **Adam optimiser** with learning rate `1e-4` and **cosine decay with warm restarts** (cycle length `T_0 = 50` steps, multiplier `T_mult = 2`)
 - Retrain only when misprediction rate on recent inputs exceeds a threshold `τ ∈ {0.1, 0.2, 0.3}` — avoid unnecessary retrains
 - Profile wall-clock time split between (a) fuzzing execution and (b) NN training per run; target >80% time in (a)
@@ -108,7 +107,6 @@ The DL scheduler assigns a mutation energy `e(s)` to each seed `s`, controlling 
 | Loss | Binary cross-entropy per edge | Multi-label classification |
 | Optimiser | Adam, lr = 1e-4 | Adaptive per-parameter LR; faster convergence than SGD |
 | LR schedule | Cosine decay with restarts | Escapes local minima during incremental retraining |
-| Validation split | 10% held out | Early stopping signal; prevents overfitting on small corpora |
 
 ### 3.2 Input Representation
 
@@ -130,6 +128,8 @@ The DL scheduler assigns a mutation energy `e(s)` to each seed `s`, controlling 
 - After every `B = 50` new executions, compute misprediction rate on recent inputs
 - If misprediction rate > `τ`, trigger retraining on the full accumulated corpus
 - Cap corpus size at `C_max = 10,000` inputs to bound memory and training time
+
+> **Deviation from NEUZZ:** NEUZZ uses a static 5:1 train/test split on an AFL-generated corpus (~2K inputs) to detect overfitting before deployment. This is not applicable here for two reasons: (1) the opaque PyInstaller binaries cannot be instrumented with AFL, so the corpus grows incrementally at ~2 new behaviors per hour rather than starting from 2K; a 5:1 split on 10–20 samples would reduce the training set below useful size. (2) The rolling `misprediction_rate` metric — computed on the `B` most recent inputs immediately before each retrain event — serves as an equivalent overfitting signal for the incremental setting.
 
 **Phase 3 — Convergence criteria:**
 - Training is considered converged when validation loss improvement < `1e-4` for 5 consecutive epochs
@@ -232,18 +232,16 @@ The ablation study answers RQ4: which components individually contribute to perf
 
 ### 5.1 Ablation Variants
 
-Define the following variants of the fuzzer, each differing from the full system in exactly one way:
+All variants are implemented. Run each with `--fresh-start --time-budget 86400 --seed <N>`.
 
-| Variant ID | What is disabled | Purpose |
-|------------|-----------------|---------|
-| **Full** | — | Full system, all components enabled |
-| **A1** | Format-aware mutation (tiers 1+2 disabled; raw bytes only) | Isolates value of format knowledge |
-| **A2** | Neural surrogate scheduler disabled; uniform energy | Isolates value of DL energy scheduling |
-| **A3** | Gradient-guided byte selection disabled; random byte selection | Isolates value of gradient signal for mutation |
-| **A4** | Incremental retraining disabled; surrogate trained once on initial corpus only | Isolates value of online learning |
-| **A5** | Cosine decay with restarts replaced by fixed LR `1e-4` | Isolates value of LR schedule |
-| **A6** | Validation set removed; train until fixed epoch count | Isolates value of early stopping |
-| **A7** | Oracle feedback to DL scheduler disabled; energy updated by coverage signal only | Isolates oracle's role in scheduling |
+| Variant ID | What is disabled | Purpose | CLI flags |
+|------------|-----------------|---------|-----------|
+| **Full** | — | Full system, all components enabled | `--evaluation-mode hybrid_dl` |
+| **A1** | Format-aware mutation (tiers 1+2 disabled; raw bytes only) | Isolates value of format knowledge | `--evaluation-mode havoc_only` |
+| **A2** | Neural surrogate scheduler disabled; uniform energy | Isolates value of DL energy scheduling | `--evaluation-mode static_payoff` |
+| **A3** | Gradient-guided byte selection disabled; random byte selection | Isolates value of gradient signal for mutation | `--evaluation-mode hybrid_dl --no-gradient-guidance` |
+| **A4** | Incremental retraining disabled; surrogate trained once on initial corpus only | Isolates value of online learning | `--evaluation-mode hybrid_dl --no-retrain` |
+| **A5** | Cosine decay with restarts replaced by fixed LR `1e-3` | Isolates value of LR schedule | `--evaluation-mode hybrid_dl --fixed-lr` |
 
 ### 5.2 What Each Ablation Tells You
 
@@ -255,32 +253,119 @@ Define the following variants of the fuzzer, each differing from the full system
 
 **A4 (no incremental retraining):** Tests whether the surrogate needs to stay up-to-date. A significant drop means the online learning loop is essential; a small drop means the cold-start surrogate generalises well enough.
 
-**A5 (fixed LR):** Validates whether the cosine decay schedule meaningfully helps surrogate accuracy under incremental retraining conditions.
-
-**A6 (no early stopping):** Measures how much time is wasted on unnecessary training epochs without a validation signal, and whether this hurts overall coverage by reducing fuzzing time.
-
-**A7 (oracle not feeding scheduler):** Isolates the specific feedback path from oracle → DL scheduler. If removing this path hurts coverage, it confirms the oracle's direct role in improving energy allocation beyond what coverage signal alone provides.
+**A5 (fixed LR):** Validates whether the cosine decay schedule meaningfully helps surrogate accuracy under incremental retraining conditions. Fixed LR used is `1e-3` (the Adam base rate in trainer.py).
 
 ### 5.3 Ablation Experimental Protocol
 
-- Run each variant on all four primary targets
-- **5 independent runs** per variant (fewer than full benchmark; ablation needs trend, not exact significance)
-- Same 24-hour time budget per run
-- Report mean edge coverage at 24h and coverage-over-time curves
-- Rank components by coverage contribution: `ΔCov(Full) − ΔCov(Aᵢ)`
+**Step 0 — Pilot check.** Confirm the full system runs end-to-end before committing to long runs:
+```bash
+python main.py ipv4 --evaluation-mode hybrid_dl --fresh-start --time-budget 600 --seed 1
+```
+Check that `results/ipv4/energy_log.csv`, `oracle_log.csv`, and `dl_training.jsonl` are produced and non-empty.
 
-### 5.4 Expected Results Table Format
+**Step 1 — Run each variant.** For each combination of variant × target × seed (1..5), run:
+```bash
+python main.py <target> <flags> --fresh-start --time-budget 86400 --seed <N>
+```
+then immediately archive the results before the next run overwrites them:
+```bash
+# Windows
+xcopy /E /I results\<target> ablation_results\<variant_id>\<target>\run<N>
 
-| Variant | IPv4 cov. | IPv6 cov. | cidrize cov. | JSON cov. | Mean Δ vs Full |
-|---------|-----------|-----------|--------------|-----------|----------------|
-| Full    | —         | —         | —            | —         | 0%             |
-| A1      |           |           |              |           |                |
-| A2      |           |           |              |           |                |
-| A3      |           |           |              |           |                |
-| A4      |           |           |              |           |                |
-| A5      |           |           |              |           |                |
-| A6      |           |           |              |           |                |
-| A7      |           |           |              |           |                |
+# Unix
+cp -r results/<target> ablation_results/<variant_id>/<target>/run<N>
+```
+
+Targets for binary variants (Full, A1–A5): `ipv4`, `ipv6`, `cidrize`.
+The `json` target uses the Atheris harness and has no DL scheduler — only A1 (`havoc_only`) is meaningful for it.
+
+**Step 2 — Collect metrics.** After all runs, for each variant × target combination:
+- Load `ablation_results/<variant>/<target>/run*/plot_data` (CSV)
+- Compute mean ± SD of `behaviors_seen` at the 24h mark across the 5 runs
+- Compute mean ± SD of `misprediction_rate` from `dl_training.jsonl` (Full, A3, A4, A5 only)
+
+**Step 3 — Fill the results table** (Section 5.4) and rank components by `ΔCov(Full) − ΔCov(Aᵢ)`.
+
+**Step 4 — Plot.** Use `python evaluation/plot_progress.py <target>` for per-run curves.
+
+**Results directory convention:**
+```
+ablation_results/
+  Full/ipv4/run1/    ← copy of results/ipv4/ after each run
+  Full/ipv4/run2/
+  ...
+  A1/ipv4/run1/
+  ...
+```
+
+**Compute budget note.** Each run = 24 h. Sequential execution: 5 runs × 6 variants × 3 targets = **90 runs = 2160 h**. The binaries take ~20–30 s per execution (PyInstaller bundles), so each 24 h run yields only ~2880–4320 total executions. To make the study feasible:
+- Run variants in parallel across machines/processes if available, or
+- Reduce to **3 runs per variant** (sufficient to detect large effects at this execution count), or
+- Use a **6 h time budget** for ablation runs and note the deviation from the full benchmark protocol.
+
+### 5.4 Metrics to Compare Across Variants
+
+Not all metrics are meaningful for all variants. Use the table below to decide what to collect and compare per variant.
+
+| Metric | Source file | Full | A1 | A2 | A3 | A4 | A5 |
+|--------|------------|:----:|:--:|:--:|:--:|:--:|:--:|
+| `behaviors_seen` at end of run | `plot_data` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `behaviors_seen` over time (curve) | `plot_data` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `unique_bugs` (real bugs found) | `bug_coverage_summary.json` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `pass_rate` (clean parses / total execs) | `stats.txt` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `execs/sec` (throughput) | `stats.txt` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `corpus_size` over time | `plot_data` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `misprediction_rate` per training round | `dl_training.jsonl` | ✓ | — | — | ✓ | ✓ | ✓ |
+| `loss` per training round | `dl_training.jsonl` | ✓ | — | — | ✓ | ✓ | ✓ |
+| Training time per round (`duration_sec`) | `dl_training.jsonl` | ✓ | — | — | ✓ | ✓ | ✓ |
+| Seed energy distribution | `energy_log.csv` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+**What each comparison isolates:**
+
+| Comparison | Primary metric | Secondary metric | What a drop means |
+|------------|---------------|-----------------|-------------------|
+| Full vs A1 | `behaviors_seen` | `unique_bugs` | Format-aware mutation adds coverage |
+| Full vs A2 | `behaviors_seen` | `energy` distribution | DL energy scheduling adds value |
+| Full vs A3 | `behaviors_seen` | `misprediction_rate` | Gradient guidance adds value beyond the surrogate alone |
+| Full vs A4 | `behaviors_seen` over time | `misprediction_rate` trajectory | Surrogate needs to stay up-to-date |
+| Full vs A5 | `loss` trajectory | `behaviors_seen` | Cosine decay helps surrogate learn better |
+
+### 5.5 Primary Results Table (fill after runs)
+
+Report mean `behaviors_seen` at end of run ± SD across 3 runs. ΔCov = Full − Aᵢ.
+
+| Variant | IPv4 | IPv6 | cidrize | Mean Δ vs Full |
+|---------|------|------|---------|----------------|
+| Full    | — ± — | — ± — | — ± — | 0 |
+| A1      | | | | |
+| A2      | | | | |
+| A3      | | | | |
+| A4      | | | | |
+| A5      | | | | |
+
+### 5.6 Secondary Results Table (fill after runs)
+
+| Variant | Unique real bugs | Pass rate | Execs/sec | Training rounds |
+|---------|-----------------|-----------|-----------|-----------------|
+| Full    | | | | |
+| A1      | | | n/a | n/a |
+| A2      | | | n/a | n/a |
+| A3      | | | | |
+| A4      | | | | 0 (disabled) |
+| A5      | | | | |
+
+### 5.7 Plots to Produce for Ablation
+
+| # | Plot | Data source | Variants |
+|---|------|------------|---------|
+| 1 | Coverage over time — line plot per target, mean ± SD shaded, all 6 variants | `plot_data` (`relative_time_sec`, `behaviors_seen`) | All |
+| 2 | Final coverage bar chart — grouped by target, one bar per variant | `plot_data` last row | All |
+| 3 | Ablation heatmap — rows = variants, cols = targets, colour = ΔCov vs Full | Derived from Table 5.5 | All |
+| 4 | Misprediction rate over training rounds | `dl_training.jsonl` (`round`, `misprediction_rate`) | Full, A3, A4, A5 |
+| 5 | Training loss over rounds | `dl_training.jsonl` (`round`, `loss`) | Full, A4, A5 |
+| 6 | Energy distribution at run end — histogram of `energy` values | `energy_log.csv` | Full vs A2 |
+| 7 | Training time overhead — stacked bar: fuzzing time vs total `duration_sec` | `dl_training.jsonl` | Full, A3, A4, A5 |
+| 8 | Pass rate bar chart — fraction of executions that parsed cleanly | `stats.txt` | All |
 
 ---
 
@@ -357,12 +442,21 @@ run_{fuzzer}_{target}_{seed}/
 
 ### 7.2 Figures to Produce
 
-1. **Coverage over time** — line plot per target, all fuzzers, mean ± 95% CI, 24h x-axis
-2. **Final coverage bar chart** — grouped bar chart, all fuzzers × targets, with significance markers
-3. **Ablation heatmap** — variants × targets, colour = ΔCov vs Full
-4. **Surrogate accuracy over time** — misprediction rate vs. number of retraining events
-5. **Energy distribution** — histogram of seed energies at hours 1, 6, 12, 24 for full system vs A2
-6. **Training time budget** — stacked bar: time in fuzzing vs. time in NN training per run
+**Benchmarking figures (Section 4 — comparing against baselines):**
+
+1. **Coverage over time** — line plot per target, all fuzzers, mean ± SD, 6h x-axis. Data: `plot_data` columns `relative_time_sec`, `behaviors_seen`.
+2. **Final coverage bar chart** — grouped bar chart, all fuzzers × targets. Data: final `behaviors_seen` from each run's `plot_data`.
+3. **Bugs found table** — count of unique real bugs (`validity` + `CRASH` + `oracle_mismatch` + `bonus`) per fuzzer × target. Data: `bug_coverage_summary.json` → `unique_real_bugs`.
+
+**Ablation figures (Section 5 — comparing variants):**
+
+4. **Ablation coverage over time** — one plot per target, one line per variant (Full, A1–A5), mean ± SD shaded. Same data source as Figure 1.
+5. **Ablation heatmap** — rows = A1–A5, columns = targets, cell colour = ΔCov(Full) − ΔCov(Aᵢ). Summarises Table 5.5 visually.
+6. **Misprediction rate over training rounds** — line plot, one line per variant (Full, A3, A4, A5). Data: `dl_training.jsonl` fields `round`, `misprediction_rate`.
+7. **Training loss over rounds** — line plot (Full, A4, A5). Data: `dl_training.jsonl` fields `round`, `loss`.
+8. **Energy distribution** — histogram of `energy` values from `energy_log.csv` for Full vs A2, plotted at the run's end.
+9. **Training time overhead** — stacked bar per variant (Full, A3, A4, A5): total fuzzing time vs sum of `duration_sec` from `dl_training.jsonl`.
+10. **Pass rate bar chart** — one bar per variant, showing `pass_count / total_executions` from `stats.txt`. Diagnoses whether mutations are preserving valid structure.
 
 ### 7.3 Claims to Validate
 
@@ -375,7 +469,6 @@ Each of the following claims must be directly supported by experimental results:
 | Gradient-guided selection outperforms random selection | A3 ablation |
 | Our fuzzer outperforms NEUZZ on JSON target | Benchmark metric table |
 | Incremental retraining is necessary for sustained coverage | A4 ablation, coverage-over-time plot |
-| Oracle feedback to scheduler meaningfully improves coverage | A7 ablation |
 
 ---
 

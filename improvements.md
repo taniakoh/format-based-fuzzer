@@ -332,3 +332,93 @@ Reasons:
 
 Key files changed:
 - `evaluation/collect_metrics.py`
+
+## 2026-04-05
+
+### Ablation study CLI flags (A4 and A5)
+Improvements:
+- Added `--no-retrain` flag that disables incremental surrogate retraining so the model is used as-is from the cold-start checkpoint only (ablation variant A4).
+- Added `--fixed-lr` flag that replaces cosine decay with restarts with a constant learning rate (`1e-3`) during surrogate training (ablation variant A5).
+- Both flags are passed through `fuzz()` and into `train()` in `trainer.py`.
+
+Reasons:
+- Completes the ablation variant set so all six variants (Full, A1–A5) can be run from the CLI without code changes.
+- A4 isolates the value of online learning; A5 isolates the value of the LR schedule.
+
+Key files changed:
+- `main.py`
+- `dl/trainer.py`
+
+### Run observability: energy log, oracle log, misprediction rate, execs/sec
+Improvements:
+- Added `energy_log.csv` (`relative_time_sec, seed_id, energy`) logged every fuzzing cycle so seed energy distribution can be plotted at hourly checkpoints.
+- Added `oracle_log.csv` (`relative_time_sec, input_hash, is_new_behavior, bug_label, latency_ms`) logged every execution so oracle verdict latency can be audited.
+- Added `misprediction_rate` to each entry in `dl_training.jsonl`, computed as per-bit Hamming error rate on the most recent `TRAIN_EVERY` inputs before each retrain event.
+- Added `Execs/sec` to `stats.txt` and `fuzzer_stats`.
+- Added `compute_misprediction_rate()` function to `dl/trainer.py`.
+
+Reasons:
+- Fills the gaps between the required log files in the testing plan (Section 7.1) and what was actually produced.
+- Hamming-based misprediction rate is meaningful for incremental retraining diagnosis; the previous all-or-nothing metric always returned 1.0 with 128 output bits.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
+- `dl/trainer.py`
+- `main.py`
+
+### Fix false positive crashes from argparse flag confusion
+Improvements:
+- Changed `--ipstr <value>` to `--ipstr=<value>` in both the direct binary runner and the AFL QEMU runner.
+
+Reasons:
+- Inputs starting with `-` were parsed by argparse inside the binary as a missing flag argument, producing exit code 2 and a spurious `CRASH` classification.
+- The `=` form forces argparse to treat the entire string after `=` as the value regardless of leading characters.
+
+Key files changed:
+- `fuzzer/executor.py`
+
+### Fix oracle reclassification for parser-reported validity bugs
+Improvements:
+- `_apply_oracle` now cross-checks the oracle before accepting the parser's "validity" label. When `oracle.expected_valid is False`, the input is invalid and the parser correctly rejected it — reclassified to `INVALIDITY` instead of `VALIDITY`.
+
+Reasons:
+- The parser labels all parse exceptions as "validity bugs" in its output regardless of whether the input was actually valid. This produced false positive validity bugs for clearly invalid inputs such as `7255.991U` and `2552`.
+- Only inputs the oracle considers valid (or unsupported) should remain as `VALIDITY` real bugs.
+
+Key files changed:
+- `fuzzer/executor.py`
+
+### Track clean parse rate
+Improvements:
+- Added `pass_count` field to `FuzzMetrics` and incremented it before the early return on `BugType.PASS` in `record_execution`.
+- Added `Pass (clean): N (X%)` line to `stats.txt` and `fuzzer_stats`.
+
+Reasons:
+- A pass rate of 0% indicates mutations are destroying all valid structure before the parser sees it, which prevents the fuzzer from exercising the parser's success path and finding boundary validity bugs.
+- Makes this diagnostic visible without inspecting raw logs.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
+
+### Unmodified seed pass-through (10%)
+Improvements:
+- Added a 10% probability in the main fuzzing loop of running the selected seed completely unmodified, skipping all three mutation tiers.
+
+Reasons:
+- With aggressive three-tier mutation, valid boundary seeds such as `255.255.255.255` were always destroyed before reaching the parser, preventing discovery of the known validity bug.
+- AFL uses the same principle: seeds are run unmodified on first selection to establish a clean baseline before mutations are applied.
+
+Key files changed:
+- `main.py`
+
+### Fix plot axes alignment
+Improvements:
+- Fixed `scale_x` to map times to the actual plot area `[x0+44, x0+width-16]` instead of the full panel bounds `[x0, x0+width]`.
+- Fixed `scale_y` to map values to the actual plot area `[y0+38, y0+height-28]` instead of `[y0, y0+height]`.
+- Fixed `mid_y` gridline to use the plot area midpoint rather than the panel midpoint.
+
+Reasons:
+- The polyline started outside the drawn axes because scaling used the outer panel dimensions rather than the inner plot area bounded by the axis lines.
+
+Key files changed:
+- `evaluation/plot_progress.py`

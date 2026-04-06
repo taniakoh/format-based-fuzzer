@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 from pathlib import Path
 
 
@@ -14,6 +15,10 @@ SERIES = (
     ("unique_bugs", "#b91c1c", "Unique bugs"),
     ("corpus_size", "#047857", "Corpus size"),
     ("unique_crashes", "#7c3aed", "Unique crashes"),
+)
+DL_SERIES = (
+    ("loss", "#d97706", "DL Training Loss"),
+    ("misprediction_rate", "#db2777", "Misprediction Rate"),
 )
 
 
@@ -57,17 +62,23 @@ def load_rows(plot_path: Path) -> list[dict[str, float]]:
     return rows
 
 
-def summarize_trend(values: list[float]) -> str:
-    if len(values) < 2:
-        return "not enough data yet"
-    start = values[0]
-    end = values[-1]
-    prev = values[-2]
-    if end == start:
-        return "flat for the whole run"
-    if end == prev:
-        return "plateaued at the end"
-    return "still rising at the end"
+def load_dl_rows(results_dir: Path) -> list[dict[str, float]]:
+    """Load DL training events from dl_training.jsonl if present."""
+    dl_path = results_dir / "dl_training.jsonl"
+    if not dl_path.exists():
+        return []
+    rows = []
+    with dl_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                entry = json.loads(line)
+                rows.append({
+                    "relative_time_sec": float(entry.get("relative_time_sec", 0)),
+                    "loss": float(entry.get("loss", 0)),
+                    "misprediction_rate": float(entry.get("misprediction_rate", 0)),
+                })
+    return rows
 
 
 def svg_polyline(points: list[tuple[float, float]]) -> str:
@@ -75,16 +86,22 @@ def svg_polyline(points: list[tuple[float, float]]) -> str:
 
 
 def scale_x(times: list[float], x0: float, width: float) -> list[float]:
+    plot_left = x0 + 44
+    plot_right = x0 + width - 16
+    plot_width = plot_right - plot_left
     if len(times) == 1 or times[-1] <= times[0]:
-        return [x0 + width / 2 for _ in times]
+        return [plot_left + plot_width / 2 for _ in times]
     start = times[0]
     span = times[-1] - start
-    return [x0 + ((t - start) / span) * width for t in times]
+    return [plot_left + ((t - start) / span) * plot_width for t in times]
 
 
 def scale_y(values: list[float], y0: float, height: float) -> tuple[list[float], float]:
+    plot_top = y0 + 38
+    plot_bottom = y0 + height - 28
+    plot_height = plot_bottom - plot_top
     max_val = max(max(values), 1.0)
-    return [y0 + height - (value / max_val) * height for value in values], max_val
+    return [plot_bottom - (value / max_val) * plot_height for value in values], max_val
 
 
 def render_panel(
@@ -96,27 +113,29 @@ def render_panel(
     y0: float,
     width: float,
     height: float,
+    is_float: bool = False,
 ) -> str:
     times = [row["relative_time_sec"] for row in rows]
     values = [row[key] for row in rows]
     xs = scale_x(times, x0, width)
     ys, y_max = scale_y(values, y0, height)
     points = list(zip(xs, ys))
-    mid_y = y0 + height / 2
+    mid_y = (y0 + 38 + y0 + height - 28) / 2
     end_x, end_y = points[-1]
-    trend = summarize_trend(values)
+
+    fmt = (lambda v: f"{v:.3f}") if is_float else (lambda v: str(int(v)))
 
     parts = [
         f'<rect x="{x0:.1f}" y="{y0:.1f}" width="{width:.1f}" height="{height:.1f}" rx="14" fill="#ffffff" stroke="#cbd5e1" />',
         f'<text x="{x0 + 16:.1f}" y="{y0 + 28:.1f}" font-size="19" font-weight="700" fill="#0f172a">{label}</text>',
-        f'<text x="{x0 + 16:.1f}" y="{y0 + 50:.1f}" font-size="14" fill="#475569">Final: {int(values[-1])} | Trend: {trend}</text>',
+        f'<text x="{x0 + 16:.1f}" y="{y0 + 50:.1f}" font-size="14" fill="#475569">Final: {fmt(values[-1])}</text>',
         f'<line x1="{x0 + 44:.1f}" y1="{y0 + 22:.1f}" x2="{x0 + 44:.1f}" y2="{y0 + height - 28:.1f}" stroke="#94a3b8" stroke-width="1.5" />',
         f'<line x1="{x0 + 44:.1f}" y1="{y0 + height - 28:.1f}" x2="{x0 + width - 16:.1f}" y2="{y0 + height - 28:.1f}" stroke="#94a3b8" stroke-width="1.5" />',
         f'<line x1="{x0 + 44:.1f}" y1="{y0 + 38:.1f}" x2="{x0 + width - 16:.1f}" y2="{y0 + 38:.1f}" stroke="#e2e8f0" stroke-width="1" />',
         f'<line x1="{x0 + 44:.1f}" y1="{mid_y:.1f}" x2="{x0 + width - 16:.1f}" y2="{mid_y:.1f}" stroke="#e2e8f0" stroke-width="1" />',
         f'<line x1="{x0 + 44:.1f}" y1="{y0 + height - 28:.1f}" x2="{x0 + width - 16:.1f}" y2="{y0 + height - 28:.1f}" stroke="#e2e8f0" stroke-width="1" />',
-        f'<text x="{x0 + 10:.1f}" y="{y0 + 42:.1f}" font-size="12" fill="#64748b">{int(y_max)}</text>',
-        f'<text x="{x0 + 10:.1f}" y="{mid_y + 4:.1f}" font-size="12" fill="#64748b">{int(round(y_max / 2))}</text>',
+        f'<text x="{x0 + 10:.1f}" y="{y0 + 42:.1f}" font-size="12" fill="#64748b">{fmt(y_max)}</text>',
+        f'<text x="{x0 + 10:.1f}" y="{mid_y + 4:.1f}" font-size="12" fill="#64748b">{fmt(y_max / 2)}</text>',
         f'<text x="{x0 + 18:.1f}" y="{y0 + height - 24:.1f}" font-size="12" fill="#64748b">0</text>',
         f'<text x="{x0 + 44:.1f}" y="{y0 + height - 8:.1f}" font-size="12" fill="#64748b">{times[0]:.0f}s</text>',
         f'<text x="{x0 + width - 46:.1f}" y="{y0 + height - 8:.1f}" font-size="12" fill="#64748b">{times[-1]:.0f}s</text>',
@@ -126,29 +145,28 @@ def render_panel(
     return "".join(parts)
 
 
-def render_svg(rows: list[dict[str, float]], title: str) -> str:
+def render_svg(rows: list[dict[str, float]], title: str, dl_rows: list[dict[str, float]] | None = None) -> str:
     if not rows:
         return render_empty_svg(title)
 
+    panel_width = 500
+    panel_height = 300
+    panel_left = 72
+    panel_top = 110
+    panel_gap_x = 56
+    panel_gap_y = 38
+
+    dl_section_height = 0
+    if dl_rows:
+        dl_section_height = 60 + panel_height + panel_gap_y
+
     width = 1200
-    height = 900
+    height = panel_top + 2 * (panel_height + panel_gap_y) + dl_section_height + 40
     header_x = 72
     summary = (
         f"Samples: {len(rows)} | Final execs: {int(rows[-1]['total_execs'])} | "
         f"Final time: {rows[-1]['relative_time_sec']:.1f}s"
     )
-    insights = (
-        f"Interpretation: behaviors={summarize_trend([row['behaviors_seen'] for row in rows])}, "
-        f"bugs={summarize_trend([row['unique_bugs'] for row in rows])}, "
-        f"corpus={summarize_trend([row['corpus_size'] for row in rows])}, "
-        f"crashes={summarize_trend([row['unique_crashes'] for row in rows])}"
-    )
-    panel_width = 500
-    panel_height = 300
-    panel_left = 72
-    panel_top = 130
-    panel_gap_x = 56
-    panel_gap_y = 38
 
     panels = []
     for index, (key, color, label) in enumerate(SERIES):
@@ -158,6 +176,17 @@ def render_svg(rows: list[dict[str, float]], title: str) -> str:
         y0 = panel_top + row_idx * (panel_height + panel_gap_y)
         panels.append(render_panel(rows, key, color, label, x0, y0, panel_width, panel_height))
 
+    dl_panels_html = ""
+    if dl_rows:
+        dl_section_y = panel_top + 2 * (panel_height + panel_gap_y) + 20
+        dl_panels_html = (
+            f'<text x="{header_x}" y="{dl_section_y - 8:.1f}" font-size="18" font-weight="700" fill="#0f172a">DL Surrogate Training</text>'
+        )
+        for col_idx, (key, color, label) in enumerate(DL_SERIES):
+            x0 = panel_left + col_idx * (panel_width + panel_gap_x)
+            y0 = dl_section_y + 10
+            dl_panels_html += render_panel(dl_rows, key, color, label, x0, y0, panel_width, panel_height, is_float=True)
+
     return f"""<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" role="img" aria-labelledby="title desc">
   <title id="title">{title}</title>
   <desc id="desc">Progress chart generated from fuzzing plot_data.</desc>
@@ -165,8 +194,8 @@ def render_svg(rows: list[dict[str, float]], title: str) -> str:
   <rect x="18" y="18" width="{width - 36}" height="{height - 36}" rx="24" fill="#f8fafc" />
   <text x="{header_x}" y="58" font-size="30" font-weight="700" fill="#0f172a">{title}</text>
   <text x="{header_x}" y="84" font-size="15" fill="#475569">{summary}</text>
-  <text x="{header_x}" y="106" font-size="15" fill="#475569">{insights}</text>
   {''.join(panels)}
+  {dl_panels_html}
 </svg>
 """
 
@@ -190,8 +219,9 @@ def main() -> None:
     args = parse_args()
     plot_path, output_path = resolve_paths(args.target_or_plot_data, args.output)
     rows = load_rows(plot_path)
+    dl_rows = load_dl_rows(plot_path.parent)
     title = f"Fuzzer Progress: {plot_path.parent.name}"
-    svg = render_svg(rows, title)
+    svg = render_svg(rows, title, dl_rows=dl_rows or None)
     output_path.write_text(svg, encoding="utf-8")
     print(f"Wrote {output_path}")
 

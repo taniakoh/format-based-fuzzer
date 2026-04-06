@@ -90,8 +90,22 @@ _IS_LINUX = sys.platform != "win32"
 
 
 def _afl_showmap() -> str | None:
-    """Return the path to afl-showmap, or None if not installed."""
-    return shutil.which("afl-showmap")
+    """Return the path to afl-showmap if installed AND QEMU mode is available.
+
+    QEMU mode requires the ``afl-qemu-trace`` binary alongside ``afl-showmap``.
+    If that helper is absent, running ``afl-showmap -Q`` fails immediately with
+    "Program 'afl-qemu-trace' not found", so we treat the whole capability as
+    unavailable and fall back to Linux behavior-hash mode.
+    """
+    showmap = shutil.which("afl-showmap")
+    if showmap is None:
+        return None
+    # afl-qemu-trace lives in the same directory as afl-showmap
+    showmap_dir = Path(showmap).parent
+    qemu_trace = showmap_dir / "afl-qemu-trace"
+    if not qemu_trace.exists() and shutil.which("afl-qemu-trace") is None:
+        return None
+    return showmap
 
 
 def _ensure_executable(path: Path) -> None:
@@ -114,13 +128,15 @@ _TRACEBACK_LAST_LINE_RE = re.compile(r"^\s*([\w.]+):\s*(.*)$")
 _STDERR_TRACEBACK_RE = re.compile(r"(Traceback \(most recent call last\):.*)", re.DOTALL)
 _PARSER_VALIDITY_RE = re.compile(r"\bA validity bug has been triggered:\s*(.+)", re.IGNORECASE)
 _PARSER_INVALIDITY_RE = re.compile(r"\bAn invalidity bug has been triggered:\s*(.+)", re.IGNORECASE)
-_PARSER_FINAL_BUG_RE = re.compile(r"\('(?P<kind>validity|invalidity|bonus)'", re.IGNORECASE)
+_PARSER_FINAL_BUG_RE = re.compile(r"\('(?P<kind>validity|invalidity|bonus|syntactic|reliability)'", re.IGNORECASE)
 
 
 class BugType:
     PASS       = "PASS"
     VALIDITY   = "validity"
     INVALIDITY = "invalidity"
+    SYNTACTIC  = "syntactic"
+    RELIABILITY = "reliability"
     BONUS      = "bonus"
     CRASH      = "CRASH"
     TIMEOUT    = "TIMEOUT"
@@ -159,6 +175,7 @@ class RunResult:
         return self.bug_type in (
             BugType.VALIDITY,
             BugType.BONUS,
+            BugType.RELIABILITY,
             BugType.CRASH,
             BugType.TIMEOUT,
             BugType.ORACLE_MISMATCH,
@@ -212,10 +229,12 @@ def _taxonomy_tags(result: "RunResult") -> list[str]:
         tags.append("ValidityBug")
     elif result.parser_reported_bug_type == BugType.INVALIDITY or result.bug_type == BugType.INVALIDITY:
         tags.append("InvalidityBug")
+    elif result.parser_reported_bug_type == BugType.SYNTACTIC or result.bug_type == BugType.SYNTACTIC:
+        tags.append("SyntacticBug")
 
     if result.bug_type == BugType.ORACLE_MISMATCH:
         tags.append("FunctionalBug")
-    if result.is_crash:
+    if result.is_crash or result.bug_type == BugType.RELIABILITY:
         tags.append("ReliabilityBug")
         if result.bug_type == BugType.TIMEOUT:
             tags.append("PerformanceBug")
@@ -340,14 +359,14 @@ def _overlay_result_signal(bitmap: bytearray, result: RunResult) -> bytes:
     crashes/timeouts and oracle-backed validity failures.
 
     Slot allocation (to avoid collisions):
-      bytes 0-1 : behavior hash  (bug_type + exception_msg)
+      bytes 0-1 : behavior hash  (bug_type + sha256(exception_msg))
       bytes 2-3 : extra slot for CRASH/TIMEOUT/VALIDITY
       bytes 4-5 : traceback hash (bug_type + full traceback text)
     """
     if result.bug_type == BugType.PASS:
         return bytes(bitmap)
 
-    key = f"{result.bug_type}|{result.exception_msg[:128]}"
+    key = f"{result.bug_type}|{hashlib.sha256(result.exception_msg.encode()).hexdigest()}"
     digest = hashlib.sha256(key.encode()).digest()
     pos = (digest[0] << 8 | digest[1]) % BITMAP_SIZE
     bitmap[pos] = 1
@@ -381,7 +400,7 @@ class Executor:
     Check ``executor.mode`` after construction to see which mode is active.
     """
 
-    def __init__(self, target: str, timeout_seconds: int | None = None):
+    def __init__(self, target: str, timeout_seconds: int | None = None, use_qemu: bool = True):
         self.target = target
 
         # ── Select binary and mode ────────────────────────────────────────────
@@ -397,7 +416,7 @@ class Executor:
                 f"or add 'binary_windows'/'binary_linux' to config/{target}_format.json."
             )
 
-        afl = _afl_showmap()
+        afl = _afl_showmap() if use_qemu else None
 
         if _IS_LINUX and linux_bin is not None and linux_bin.exists():
             self.binary  = linux_bin
@@ -468,13 +487,14 @@ class Executor:
             "--",
             str(self.binary),
             *self._fixed_args,
-            "--ipstr", input_str,
+            f"--ipstr={input_str}",
         ]
 
         try:
             proc = subprocess.run(
                 cmd,
                 capture_output=True,
+                stdin=subprocess.DEVNULL,
                 text=True,
                 errors="replace",
                 timeout=self.timeout + 5,   # outer Python timeout > inner AFL timeout
@@ -523,7 +543,18 @@ class Executor:
                 pass
 
         exc_msg, tb = _parse_output(stdout, stderr)
-        if proc.returncode not in (0, 1):
+        if proc.returncode == 2:
+            # afl-showmap exit code 2 = internal timeout
+            result = RunResult(
+                input_str=input_str,
+                bug_type=BugType.TIMEOUT,
+                exit_code=proc.returncode,
+                stdout=stdout,
+                stderr=stderr,
+                exception_msg="Process timed out (afl-showmap)",
+            )
+            return _result_to_bitmap(result), True, result
+        elif proc.returncode not in (0, 1):
             bug_type = BugType.CRASH
             exc_msg = _summarize_process_failure(stdout, stderr, proc.returncode)
         else:
@@ -548,7 +579,7 @@ class Executor:
     # ── Shared binary runner (Linux-no-AFL and Windows) ───────────────────────
 
     def _run_binary(self, input_str: str) -> RunResult:
-        cmd = [str(self.binary), *self._fixed_args, "--ipstr", input_str]
+        cmd = [str(self.binary), *self._fixed_args, f"--ipstr={input_str}"]
         try:
             proc = subprocess.run(
                 cmd,
@@ -605,11 +636,23 @@ class Executor:
         if result.bug_type in (BugType.CRASH, BugType.TIMEOUT):
             return result
 
-        observed_rejection = bool(result.traceback)
+        # In QEMU mode afl-showmap does not forward the target's stdout/stderr,
+        # so result.traceback is always empty even when the parser raised a
+        # ParseException and exited with code 1.  Use exit_code == 1 as a
+        # supplementary rejection signal; afl-showmap does pass the target's
+        # exit code through unchanged.
+        observed_rejection = bool(result.traceback) or result.exit_code == 1
         exc_type = _traceback_exception_type(result.traceback)
-        is_parse_rejection = exc_type.endswith("ParseException")
+        is_parse_rejection = exc_type.endswith("ParseException") or result.exit_code == 1
 
         if result.parser_reported_bug_type == BugType.VALIDITY:
+            # Oracle cross-check: if the oracle knows this input is invalid,
+            # the parser is correctly rejecting it — not a validity bug.
+            if verdict.supported and verdict.expected_valid is False:
+                result.bug_type = BugType.INVALIDITY
+                detail = result.parser_reported_message or result.exception_msg or ""
+                result.exception_msg = detail
+                return result
             result.bug_type = BugType.VALIDITY
             detail = result.parser_reported_message or result.exception_msg or "Parser reported a validity bug"
             result.exception_msg = f"{detail} [oracle={verdict.reason}]"
@@ -629,6 +672,33 @@ class Executor:
             result.bug_type = BugType.INVALIDITY
             detail = result.parser_reported_message or result.exception_msg or "Parser reported an invalidity bug"
             result.exception_msg = detail
+            return result
+
+        if result.parser_reported_bug_type == BugType.SYNTACTIC:
+            # Oracle cross-check: if the oracle considers this input valid, the
+            # parser is wrongly rejecting it with a syntactic error → reclassify
+            # as a ValidityBug.
+            if verdict.supported and verdict.expected_valid is True:
+                result.bug_type = BugType.VALIDITY
+                detail = (
+                    result.parser_reported_message
+                    or "Parser reported syntactic error but oracle considers input valid"
+                )
+                result.exception_msg = f"{detail} [oracle={verdict.reason}]"
+                return result
+            result.bug_type = BugType.SYNTACTIC
+            detail = result.parser_reported_message or result.exception_msg or "Parser reported a syntactic bug"
+            result.exception_msg = detail
+            return result
+
+        if result.parser_reported_bug_type == BugType.RELIABILITY:
+            # Reliability bugs are real bugs regardless of oracle verdict —
+            # they indicate unexpected parser failure (e.g. unhandled exception,
+            # crash, or resource exhaustion).  Oracle context is appended but
+            # does not demote the classification.
+            result.bug_type = BugType.RELIABILITY
+            detail = result.parser_reported_message or result.exception_msg or "Parser reported a reliability bug"
+            result.exception_msg = f"{detail} [oracle={verdict.reason}]" if verdict.supported else detail
             return result
 
         if not verdict.supported:

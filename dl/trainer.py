@@ -13,6 +13,23 @@ from __future__ import annotations
 from pathlib import Path
 
 _HERE = Path(__file__).parent.parent
+
+
+def _normalize_seed(seed: bytes, max_len: int) -> list[int]:
+    """
+    Encode seed bytes for model input.
+
+    Keeps printable ASCII (0x20–0x7e) as-is; maps everything else to 0
+    so the model sees a clean representation matching what the parser
+    actually receives (havoc mutations can inject non-ASCII garbage that
+    the parser never meaningfully processes).
+    Pads or truncates to exactly max_len bytes.
+    """
+    normalized = [b if 0x20 <= b <= 0x7e else 0 for b in seed[:max_len]]
+    normalized += [0] * max(0, max_len - len(seed))
+    return normalized
+
+
 MODELS_DIR = _HERE / "models"
 CONFIDENCE_LOSS_WEIGHT = 0.25
 
@@ -31,6 +48,9 @@ def save_checkpoint(model, target: str, metadata: dict | None = None) -> None:
         optimizer = getattr(model, "_optimizer", None)
         if optimizer is not None:
             payload["optimizer_state_dict"] = optimizer.state_dict()
+        scheduler = getattr(model, "_scheduler", None)
+        if scheduler is not None:
+            payload["scheduler_state_dict"] = scheduler.state_dict()
         if metadata:
             payload["metadata"] = metadata
         torch.save(payload, path)
@@ -62,6 +82,13 @@ def load_checkpoint(model, target: str, device: str) -> dict:
             and "optimizer_state_dict" in state
         ):
             optimizer.load_state_dict(state["optimizer_state_dict"])
+        scheduler = getattr(model, "_scheduler", None)
+        if (
+            scheduler is not None
+            and isinstance(state, dict)
+            and "scheduler_state_dict" in state
+        ):
+            scheduler.load_state_dict(state["scheduler_state_dict"])
         print(f"[DL] Checkpoint loaded ← {path}")
         metadata = state.get("metadata", {}) if isinstance(state, dict) else {}
         return {"loaded": True, "metadata": metadata}
@@ -89,9 +116,55 @@ def _build_confidence_targets(coverage, target):
     return confidence_targets
 
 
+def compute_misprediction_rate(
+    model,
+    corpus_data: list[tuple[bytes, list[int]]],
+    device: str | None = None,
+) -> float:
+    """
+    Fraction of inputs where the surrogate mispredicts at least one coverage bit.
+
+    A prediction is 'wrong' for a given input if any bit differs between the
+    thresholded model output (>0.5) and the true coverage label.
+    Returns 0.0 when torch is unavailable or corpus_data is empty.
+    """
+    try:
+        import torch
+        from dl.surrogate import CoverageSurrogate, get_device
+    except ImportError:
+        return 0.0
+
+    if not corpus_data:
+        return 0.0
+
+    if device is None:
+        device = get_device()
+
+    MAX_LEN = CoverageSurrogate.MAX_LEN
+    COV_DIM = CoverageSurrogate.COV_DIM
+
+    model.eval()
+    total_bit_errors = 0
+    total_bits = 0
+    with torch.no_grad():
+        for seed, positions in corpus_data:
+            padded = _normalize_seed(seed, MAX_LEN)
+            x = torch.tensor([padded], dtype=torch.long, device=device)
+            coverage, _ = model(x)
+            pred_bits = (coverage.squeeze() > 0.5).tolist()
+            true_bits = [False] * COV_DIM
+            for pos in positions:
+                true_bits[pos % COV_DIM] = True
+            total_bit_errors += sum(p != t for p, t in zip(pred_bits, true_bits))
+            total_bits += COV_DIM
+
+    return total_bit_errors / total_bits if total_bits > 0 else 0.0
+
+
 def train(model, corpus_data: list[tuple[bytes, list[int]]], epochs: int = 5,
           lr: float = 1e-3, device: str | None = None,
-          optimizer=None, batch_size: int = 32) -> float:
+          optimizer=None, batch_size: int = 32,
+          fixed_lr: bool = False) -> float:
     """
     Train the surrogate model on observed (seed, bitmap_positions) pairs.
 
@@ -110,6 +183,7 @@ def train(model, corpus_data: list[tuple[bytes, list[int]]], epochs: int = 5,
     try:
         import torch
         import torch.nn as nn
+        from torch.optim.lr_scheduler import CosineAnnealingLR
         from torch.utils.data import DataLoader, TensorDataset
         from dl.surrogate import CoverageSurrogate, get_device
     except ImportError:
@@ -128,13 +202,11 @@ def train(model, corpus_data: list[tuple[bytes, list[int]]], epochs: int = 5,
     encoded_inputs = []
     encoded_targets = []
     for seed, positions in corpus_data:
-        padded = list(seed[:MAX_LEN]) + [0] * max(0, MAX_LEN - len(seed))
-        encoded_inputs.append(padded)
+        encoded_inputs.append(_normalize_seed(seed, MAX_LEN))
 
         target = [0.0] * COV_DIM
         for pos in positions:
-            if 0 <= pos < COV_DIM:
-                target[pos] = 1.0
+            target[pos % COV_DIM] = 1.0
         encoded_targets.append(target)
 
     inputs = torch.tensor(encoded_inputs, dtype=torch.long)
@@ -152,6 +224,10 @@ def train(model, corpus_data: list[tuple[bytes, list[int]]], epochs: int = 5,
     if optimizer is None:
         optimizer = torch.optim.Adam(model.parameters(), lr=lr)
         model._optimizer = optimizer
+    scheduler = None if fixed_lr else getattr(model, "_scheduler", None)
+    if scheduler is None and not fixed_lr:
+        scheduler = CosineAnnealingLR(optimizer, T_max=max(1, epochs), eta_min=lr * 0.01)
+        model._scheduler = scheduler
     coverage_loss_fn = nn.BCELoss()
     confidence_loss_fn = nn.MSELoss()
 
@@ -175,6 +251,8 @@ def train(model, corpus_data: list[tuple[bytes, list[int]]], epochs: int = 5,
             sample_count += batch_samples
 
         final_loss = epoch_loss / sample_count if sample_count else 0.0
+        if scheduler is not None:
+            scheduler.step()
 
     model.eval()
     return final_loss
