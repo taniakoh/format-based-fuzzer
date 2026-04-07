@@ -37,7 +37,20 @@
       "Bash(grep -v __pycache__ find \"C:/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer\" -name \"buggy_ipyparse\" -type d)",
       "Bash(sed -n '370,400p' \"C:/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/fuzzer/mutation/tier2_semantic.py\")",
       "Bash(sed -n '810,850p' \"C:/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/fuzzer/mutation/tier2_semantic.py\")",
-      "Bash(sort -t',' -k4 -rn)"
+      "Bash(sort -t',' -k4 -rn)",
+      "Bash(grep -v \"Error thrown\\\\|^--$\")",
+      "Bash(grep -v \"^#\\\\|Error thrown\\\\|param\\\\|type\\\\|return\\\\|rtype\\\\|@\\\\|>>>|^[a-z]{1,3}$\\\\|dict\\\\|list\\\\|str\\\\|int\\\\|bool\\\\|None\\\\|True\\\\|False\\\\|self\\\\|args\\\\|kwargs\\\\|cidrize\\\\.\")",
+      "Bash(timeout 30 cidrize-runner-main/bin/win-cidrize-runner.exe --func cidrize --ipstr -192.0.2.1)",
+      "Bash(timeout 30 cidrize-runner-main/bin/win-cidrize-runner.exe --func cidrize --ipstr '192.0.2.[abc]')",
+      "Bash(timeout 30 cidrize-runner-main/bin/win-cidrize-runner.exe --func cidrize --ipstr example.com)",
+      "Bash(timeout 30 cidrize-runner-main/bin/win-cidrize-runner.exe --func cidrize --ipstr=-192.0.2.1)",
+      "Bash(timeout 30 cidrize-runner-main/bin/win-cidrize-runner.exe --func cidrize --ipstr 192.0.2.1-)",
+      "Bash(timeout 30 cidrize-runner-main/bin/win-cidrize-runner.exe --func cidrize --ipstr=-1.2.3.4)",
+      "Bash(timeout 30 cidrize-runner-main/bin/win-cidrize-runner.exe --func cidrize --ipstr '192.0.2.[12345]')",
+      "Bash(pycdc \"C:/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/win-cidrize-runner.exe_extracted/PYZ.pyz_extracted/buggy_cidrize/cidrize_stv.pyc\")",
+      "Bash(decompyle3 --version)",
+      "Bash(ls \"C:\\\\Users\\\\tanta\\\\Downloads\\\\Code\\\\softwaretesting\\\\format-based-fuzzer\"/*.py)",
+      "Bash(timeout 90 ./ipv4ipv6/win-ipv6-parser.exe --ipstr \"0:1:2:3:4:5:::6\")"
     ]
   }
 }

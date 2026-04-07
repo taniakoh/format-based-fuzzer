@@ -1,9 +1,13 @@
 """
 Grammar-based seed generators for IPv4 and IPv6 address strings.
 
-Produces 100% syntactically valid seeds so mutations start from a known-good
-state, not random bytes.  All seeds are returned as bytes (UTF-8 encoded
-address strings) to match the common bytes-in / bytes-out mutation interface.
+Produces a mixed corpus of valid and structured-invalid seeds.  Valid seeds
+give mutations a well-formed starting point; invalid seeds exercise parser
+error-handling paths directly without relying on mutations to stumble into
+them.  The ratio is roughly 70 % valid / 30 % invalid for each generator.
+
+All seeds are returned as bytes (UTF-8 encoded address strings) to match the
+common bytes-in / bytes-out mutation interface.
 
 Adding a new format
 -------------------
@@ -127,14 +131,35 @@ class GenericSeedGenerator(SeedGenerator):
 
 @SeedGenerator.register("ipv4")
 class IPv4SeedGenerator(SeedGenerator):
-    """Generates valid IPv4 address strings."""
+    """Generates a mix of valid and structured-invalid IPv4 address strings."""
 
-    # Boundary-rich octet values that stress parsers
     BOUNDARY_OCTETS = [0, 1, 9, 10, 99, 100, 127, 128, 199, 200, 254, 255]
+    OVERFLOW_OCTETS = [256, 300, 999]
+
+    # Invalid structural templates — wrong octet count, out-of-range, bad separators
+    INVALID_TEMPLATES = [
+        "{o}.{o}.{o}",            # too few octets
+        "{o}.{o}.{o}.{o}.{o}",   # too many octets
+        "{x}.{o}.{o}.{o}",        # first octet out of range
+        "{o}.{o}.{o}.{x}",        # last octet out of range
+        "{o}.{o}.{o}.",            # trailing dot
+        ".{o}.{o}.{o}.{o}",       # leading dot
+        "{o}.{o}..{o}",            # consecutive dots
+        "{o},{o},{o},{o}",         # wrong separator
+        "",                        # empty string
+    ]
+
+    def _octet(self) -> str:
+        return str(random.choice(self.BOUNDARY_OCTETS))
+
+    def _overflow(self) -> str:
+        return str(random.choice(self.OVERFLOW_OCTETS))
 
     def generate(self) -> bytes:
+        if random.random() < 0.3:
+            tmpl = random.choice(self.INVALID_TEMPLATES)
+            return tmpl.format(o=self._octet(), x=self._overflow()).encode()
         octets = [random.choice(self.BOUNDARY_OCTETS) for _ in range(4)]
-        # Randomly add leading zeros (valid per the parser's spec)
         parts = [
             str(o).zfill(random.choice([1, 2, 3])) if random.random() < 0.3 else str(o)
             for o in octets
@@ -148,12 +173,11 @@ class IPv4SeedGenerator(SeedGenerator):
 
 @SeedGenerator.register("ipv6")
 class IPv6SeedGenerator(SeedGenerator):
-    """Generates valid IPv6 address strings."""
+    """Generates a mix of valid and structured-invalid IPv6 address strings."""
 
     BOUNDARY_GROUPS = ["0", "1", "ff", "fe", "ffff", "0001", "dead", "beef", "db8"]
 
-    # Fixed valid addresses that cover distinct structural forms
-    STRUCTURAL_TEMPLATES = [
+    VALID_TEMPLATES = [
         "{g}:{g}:{g}:{g}:{g}:{g}:{g}:{g}",   # full 8-group
         "{g}::{g}",                             # double-colon middle
         "::{g}",                                # leading double-colon
@@ -164,28 +188,48 @@ class IPv6SeedGenerator(SeedGenerator):
         "{g}:{g}:{g}::{g}",
     ]
 
-    def _random_group(self) -> str:
+    # Invalid structural forms — wrong group count, bad separators, overlong groups
+    INVALID_TEMPLATES = [
+        "{g}:{g}:{g}:{g}:{g}:{g}:{g}:{g}:{g}", # too many groups
+        "{g}:{g}:{g}:{g}:{g}:{g}:{g}",          # too few groups, no ::
+        "{g}::{g}::{g}",                          # multiple double-colons
+        "{g}:{g}:{g}:{g}:{g}:{g}:{g}:{g}:",      # trailing colon
+        ":{g}:{g}:{g}:{g}:{g}:{g}:{g}:{g}",      # leading single colon
+        "{g5}:{g}:{g}:{g}:{g}:{g}:{g}:{g}",      # 5-hex-digit group (overlong)
+        "{g}",                                     # single group
+        "",                                        # empty string
+    ]
+
+    def _group(self) -> str:
         return random.choice(self.BOUNDARY_GROUPS)
 
+    def _group5(self) -> str:
+        return random.choice(["fffff", "10000", "1ffff", "abcde"])
+
     def generate(self) -> bytes:
-        template = random.choice(self.STRUCTURAL_TEMPLATES)
-        addr = template.format(g=self._random_group())
-        # Occasionally append a mixed IPv4 suffix
-        if random.random() < 0.15:
-            ipv4_suffix = ".".join(str(random.randint(0, 255)) for _ in range(4))
-            parts = addr.rsplit(":", 1)
-            addr = parts[0] + ":" + ipv4_suffix
+        if random.random() < 0.3:
+            tmpl = random.choice(self.INVALID_TEMPLATES)
+            addr = tmpl.format(g=self._group(), g5=self._group5())
+        else:
+            tmpl = random.choice(self.VALID_TEMPLATES)
+            addr = tmpl.format(g=self._group())
+            # Occasionally append a mixed IPv4 suffix
+            if random.random() < 0.15:
+                ipv4_suffix = ".".join(str(random.randint(0, 255)) for _ in range(4))
+                parts = addr.rsplit(":", 1)
+                addr = parts[0] + ":" + ipv4_suffix
         return addr.encode()
 
 
 @SeedGenerator.register("json")
 @SeedGenerator.register("json_direct")
 class JSONSeedGenerator(SeedGenerator):
-    """Generates structurally varied, valid JSON seeds.
+    """Generates a mix of valid and structured-invalid JSON seeds.
 
-    Covers all value types, nesting depths, boundary numbers, unicode strings,
-    and edge cases that stress JSON parsers (empty containers, duplicate-ish
-    keys, floats, large integers, escape sequences).
+    Valid seeds cover all value types, nesting depths, boundary numbers,
+    unicode strings, and edge cases.  Invalid seeds cover common structural
+    errors (bad syntax, wrong types, truncated input) that exercise the
+    parser's error-handling paths directly.
     """
 
     BOUNDARY_INTS  = [0, 1, -1, 127, -128, 255, 256, -256,
@@ -260,8 +304,29 @@ class JSONSeedGenerator(SeedGenerator):
             return random.choice([True, False])
         return None
 
+    # Structurally invalid JSON strings that exercise parser error paths
+    INVALID_SEEDS = [
+        b"{",                        # unclosed object
+        b"[",                        # unclosed array
+        b'{"a": 1,}',               # trailing comma in object
+        b'[1, 2, 3,]',              # trailing comma in array
+        b"{'a': 1}",                # single-quoted keys
+        b'{a: 1}',                  # unquoted key
+        b'{"a": undefined}',        # undefined value
+        b'{"a": .5}',               # leading-dot float
+        b'{"a": 1 "b": 2}',        # missing comma
+        b'[1, 2',                   # truncated array
+        b'"\x00"',                  # null byte in string
+        b"",                         # empty input
+        b"NaN",                      # bare NaN
+        b"Infinity",                 # bare Infinity
+        b"\xff\xfe{}",              # BOM prefix
+    ]
+
     def generate(self) -> bytes:
         import json as _json
+        if random.random() < 0.3:
+            return random.choice(self.INVALID_SEEDS)
         try:
             value = self._random_top_level()
             return _json.dumps(value, ensure_ascii=False).encode("utf-8")
@@ -271,7 +336,7 @@ class JSONSeedGenerator(SeedGenerator):
 
 @SeedGenerator.register("cidrize")
 class CidrizeSeedGenerator(SeedGenerator):
-    """Generates valid mixed-notation IP strings for the cidrize target."""
+    """Generates a mix of valid and structured-invalid IP strings for the cidrize target."""
 
     IPV4_OCTETS = [0, 1, 2, 8, 10, 24, 26, 64, 80, 85, 127, 170, 175, 192, 255]
     IPV6_GROUPS = ["0", "1", "2", "5", "8", "64", "db8", "ffff", "abcd", "dead"]
@@ -292,19 +357,40 @@ class CidrizeSeedGenerator(SeedGenerator):
         template = random.choice(templates)
         return template.format(g=random.choice(self.IPV6_GROUPS), ipv4=self._ipv4())
 
+    def _invalid(self) -> str:
+        choice = random.choice([
+            "bad_cidr_prefix",
+            "descending_range",
+            "bad_octet",
+            "missing_part",
+            "wrong_separator",
+        ])
+        if choice == "bad_cidr_prefix":
+            return f"{self._ipv4()}/{random.choice([33, 64, 128, 999])}"
+        if choice == "descending_range":
+            # end numerically before start — always invalid
+            a, b = self._ipv4(), self._ipv4()
+            return f"{b}-{a}" if a < b else f"{a}-{b[:-1]}0"
+        if choice == "bad_octet":
+            return f"{random.choice([256, 300, 999])}.{self._ipv4()}"
+        if choice == "missing_part":
+            return random.choice(["", "/24", "-", f"{self._ipv4()}/", f"{self._ipv4()}-"])
+        # wrong_separator
+        return self._ipv4().replace(".", random.choice([",", ":", " "]))
+
     def generate(self) -> bytes:
-        choice = random.choice(
-            [
-                "ipv4",
-                "ipv4_cidr",
-                "ipv4_range",
-                "ipv4_partial_range",
-                "ipv4_wildcard",
-                "ipv6",
-                "ipv6_cidr",
-                "ipv6_range",
-            ]
-        )
+        if random.random() < 0.3:
+            return self._invalid().encode()
+        choice = random.choice([
+            "ipv4",
+            "ipv4_cidr",
+            "ipv4_range",
+            "ipv4_partial_range",
+            "ipv4_wildcard",
+            "ipv6",
+            "ipv6_cidr",
+            "ipv6_range",
+        ])
         if choice == "ipv4":
             value = self._ipv4()
         elif choice == "ipv4_cidr":
@@ -322,12 +408,10 @@ class CidrizeSeedGenerator(SeedGenerator):
             value = f"{base}.{start}-{end}"
         elif choice == "ipv4_wildcard":
             base = ".".join(str(random.choice(self.IPV4_OCTETS)) for _ in range(3))
-            value = random.choice(
-                [
-                    f"{base}.[{random.choice(['0123', '5678', '89'])}]",
-                    f"{base}.{random.choice(['1', '8', '9'])}[0-5]",
-                ]
-            )
+            value = random.choice([
+                f"{base}.[{random.choice(['0123', '5678', '89'])}]",
+                f"{base}.{random.choice(['1', '8', '9'])}[0-5]",
+            ])
         elif choice == "ipv6":
             value = self._ipv6()
         elif choice == "ipv6_cidr":

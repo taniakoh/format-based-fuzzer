@@ -835,13 +835,17 @@ class IPv6SemanticMutator(SemanticMutator):
     ) -> tuple[bytes, str]:
         """Replace an existing colon separator with a run of 2–4 colons.
 
-        Targets the separator positions directly so the run lands between
-        two real groups, which is the only path that survives the
-        pyparsing grammar and reaches the token-processing logic.
+        Only bare group-separator colons are eligible — colons that are
+        already adjacent to another colon (i.e. part of '::' notation) are
+        skipped so the mutation doesn't corrupt compressed-notation addresses
+        into unstructured byte noise.
         """
         s = self._decode(data)
         spans = self.get_semantic_spans(data)
-        colon_positions = [i for i, ch in enumerate(s) if ch == ":"]
+        colon_positions = [
+            i for i, ch in enumerate(s)
+            if ch == ":" and (i == 0 or s[i - 1] != ":") and (i + 1 >= len(s) or s[i + 1] != ":")
+        ]
         if not colon_positions:
             return data, "group1"
         if hot_bytes:

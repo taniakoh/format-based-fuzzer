@@ -11,6 +11,7 @@ This keeps the oracle from overfitting to the current hand-written examples.
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 from dataclasses import dataclass
 
@@ -44,6 +45,8 @@ def evaluate_target_input(target: str, input_str: str) -> OracleVerdict:
         return _ipv6_oracle(input_str)
     if target_name == "cidrize":
         return _cidrize_oracle(input_str)
+    if target_name in ("json", "json_direct"):
+        return _json_oracle(input_str)
     return OracleVerdict(False, None, "no_oracle_for_target", shape="unsupported")
 
 
@@ -119,6 +122,37 @@ def _ipv6_oracle(value: str) -> OracleVerdict:
         shape="plain_ipv6",
         normalized=str(address),
     )
+
+
+def _json_oracle(value: str) -> OracleVerdict:
+    """Use Python's stdlib json.loads as the reference oracle for JSON targets.
+
+    If stdlib accepts the input it is valid JSON; if it raises JSONDecodeError
+    it is invalid.  Any other exception is treated as unsupported so the fuzzer
+    can still explore those inputs without committing to a verdict.
+    """
+    try:
+        json.loads(value)
+        return _verdict(
+            supported=True,
+            expected_valid=True,
+            reason="json_valid",
+            shape="json",
+        )
+    except json.JSONDecodeError:
+        return _verdict(
+            supported=True,
+            expected_valid=False,
+            reason="json_invalid",
+            shape="json",
+        )
+    except Exception:
+        return _verdict(
+            supported=False,
+            expected_valid=None,
+            reason="json_oracle_error",
+            shape="unsupported",
+        )
 
 
 def _cidrize_oracle(value: str) -> OracleVerdict:

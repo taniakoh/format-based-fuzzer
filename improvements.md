@@ -423,6 +423,35 @@ Reasons:
 Key files changed:
 - `evaluation/plot_progress.py`
 
+## 2026-04-08
+
+### Mixed valid/invalid seed corpus
+
+Improvements:
+- Updated all four seed generators (`IPv4SeedGenerator`, `IPv6SeedGenerator`, `JSONSeedGenerator`, `CidrizeSeedGenerator`) to produce a mixed corpus of roughly 70 % valid and 30 % structured-invalid seeds.
+- Each generator now has an explicit set of invalid structural templates or literal seeds covering the most common parser error paths: wrong field counts, out-of-range values, bad separators, truncated input, and malformed notation.
+- Updated the module docstring to reflect the mixed-corpus intent.
+
+Reasons:
+- A valid-only corpus relies entirely on mutations to reach invalid-input code paths. For expensive targets (20–30 s per execution) this wastes a large fraction of the time budget on seeds that must be mutated "far enough" before they exercise error handling.
+- Structured-invalid seeds reach parser error paths directly on first execution and give the mutation engine a foothold in the invalid-input region of the input space, so subsequent mutations can explore that region rather than stumbling into it from scratch.
+- The 70/30 split keeps the majority of the corpus valid so Tier 2 semantic mutations still have well-formed starting points for structured edits.
+
+Key files changed:
+- `fuzzer/seed_generator.py`
+
+### Fix `_colon_run` to target only isolated group-separator colons
+
+Improvements:
+- Restricted the set of eligible positions in `_colon_run` to colons that are not adjacent to another colon, excluding characters that are already part of `::` compressed notation.
+
+Reasons:
+- The previous implementation picked any colon position, including those inside `::`. Replacing one half of `::` with a longer run corrupts the compressed address into unstructured noise rather than placing a meaningful separator run between two hex groups, so the mutated input hit trivially early parse failures instead of reaching deeper parser logic.
+- Restricting to bare group-separator colons ensures the run always lands at an inter-group boundary, which is the only position where it can exercise the parser's separator-handling logic.
+
+Key files changed:
+- `fuzzer/mutation/tier2_semantic.py`
+
 ## 2026-04-07
 
 ### Refresh pinned dependency set
