@@ -436,3 +436,19 @@ Reasons:
 
 Key files changed:
 - `requirements.txt`
+
+### Add ISTD evaluation metrics and graphs
+Improvements:
+- Added an explicit `interesting_test_cases` series to `plot_data` so ISTD Graph 1.2 and Graph 1.3 can be rendered directly from run output.
+- Added separate average generation-time and execution-time metrics to `stats.txt` and `bug_coverage_summary.json`.
+- Added `evaluation/plot_istd_eval.py` to render interesting test cases vs wall-clock time and vs total tests as an SVG.
+
+Reasons:
+- The existing output had enough raw signals for partial evaluation, but the requested ISTD figures and RQ2 timing breakdown were not directly available.
+- Separating mutation-generation cost from target-execution cost makes the efficiency table more accurate than using combined `execs/sec` alone.
+
+Key files changed:
+- `main.py`
+- `evaluation/collect_metrics.py`
+- `evaluation/plot_istd_eval.py`
+- `README.md`

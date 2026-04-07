@@ -313,7 +313,7 @@ All results are written to `results/<target>/`:
 | `unique_bugs.json` | Deduplicated bug signatures with first-seen execution, oracle context, and one example input |
 | `crashes/crash_NNNNNN.txt` | One file per crashing input |
 | `queue/id_NNNNNN.txt` | Interesting inputs re-added to the corpus, with exec number and priority |
-| `plot_data` | CSV progress samples over time (`relative_time_sec`, `total_execs`, `behaviors_seen`, `corpus_size`, `unique_bugs`, `unique_crashes`) |
+| `plot_data` | CSV progress samples over time (`relative_time_sec`, `total_execs`, `behaviors_seen`, `interesting_test_cases`, `corpus_size`, `unique_bugs`, `unique_crashes`) |
 | `progress.svg` | Optional chart generated from `plot_data` with `evaluation/plot_progress.py` |
 | `fuzzer_config` | JSON snapshot of the effective run configuration |
 | `fuzzer_stats` | Duplicate of the end-of-run text summary for AFL/Neuzz-style tooling |
@@ -369,6 +369,33 @@ Read the panels like this:
 For demo-friendly bug inspection, open `results/<target>/unique_bugs.json`.
 It stores one entry per distinct saved bug signature along with
 the first execution where it appeared and an example triggering input.
+
+### Generating ISTD evaluation graphs
+
+To render the two checklist graphs directly from `plot_data`:
+
+```bash
+python evaluation/plot_istd_eval.py ipv4
+python evaluation/plot_istd_eval.py results/ipv4/plot_data --output results/ipv4/istd_eval.svg
+```
+
+This writes an SVG containing:
+
+- Graph 1.2: interesting test cases vs wall-clock time
+- Graph 1.3: interesting test cases vs total tests
+
+For newer runs, `interesting_test_cases` is logged explicitly. For older runs,
+the plotter falls back to `corpus_size` so archived data still renders.
+
+### RQ2 timing metrics
+
+`stats.txt` and `bug_coverage_summary.json` now include:
+
+- `Avg gen/test`: average candidate generation time, excluding target execution
+- `Avg run/test`: average target execution time only
+
+These are collected separately inside the main fuzz loop, so they can be used
+for the RQ2 efficiency table without relying on combined `execs/sec`.
 
 ---
 

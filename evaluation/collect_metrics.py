@@ -89,6 +89,7 @@ class FuzzMetrics:
     unique_bug_count: int = 0
     traceback_unique_bugs: int = 0
     interesting_result_count: int = 0
+    interesting_test_case_count: int = 0
     unique_crashes: int = 0
     validity_bugs: int = 0
     bonus_bugs: int = 0
@@ -104,6 +105,8 @@ class FuzzMetrics:
     exec_to_first_real_bug: int | None = None
     time_to_first_crash: float | None = None
     exec_to_first_crash: int | None = None
+    total_generation_time_ms: float = 0.0
+    total_execution_time_ms: float = 0.0
     wall_time_secs: float = 0.0
     crash_log: list[str] = field(default_factory=list)
 
@@ -142,6 +145,7 @@ class MetricsCollector:
                 "relative_time_sec",
                 "total_execs",
                 "behaviors_seen",
+                "interesting_test_cases",
                 "corpus_size",
                 "unique_bugs",
                 "unique_crashes",
@@ -295,6 +299,7 @@ class MetricsCollector:
 
     def record_queue_entry(self, seed: bytes, exec_count: int, priority: float) -> None:
         """Persist an interesting seed in a queue/ directory similar to AFL/Neuzz."""
+        self.metrics.interesting_test_case_count += 1
         queue_id = self.metrics.behaviors_covered
         queue_path = self._out / "queue" / f"id_{queue_id:06d}.txt"
         input_str = seed.decode("latin-1", errors="replace")
@@ -306,6 +311,11 @@ class MetricsCollector:
         )
         queue_path.write_text(content, encoding="utf-8", errors="replace")
 
+    def record_timing(self, generation_ms: float, execution_ms: float) -> None:
+        """Accumulate separate candidate-generation and target-execution timings."""
+        self.metrics.total_generation_time_ms += max(0.0, generation_ms)
+        self.metrics.total_execution_time_ms += max(0.0, execution_ms)
+
     def record_plot_point(self, corpus_size: int) -> None:
         """Append one progress sample to plot_data."""
         with open(self._plot_path, "a", encoding="utf-8", newline="") as f:
@@ -314,6 +324,7 @@ class MetricsCollector:
                 f"{time.time() - self._start:.3f}",
                 self.metrics.total_executions,
                 self.metrics.behaviors_covered,
+                self.metrics.interesting_test_case_count,
                 corpus_size,
                 self.metrics.unique_bug_count,
                 self.metrics.unique_crashes,
@@ -466,7 +477,16 @@ class MetricsCollector:
                 "pass_count": self.metrics.pass_count,
                 "pass_rate": round(self.metrics.pass_count / max(1, total_execs), 4),
                 "behaviors_seen": self.metrics.behaviors_covered,
+                "interesting_test_cases": self.metrics.interesting_test_case_count,
                 "corpus_size": self._last_corpus_size(),
+                "avg_generation_time_ms": round(
+                    self.metrics.total_generation_time_ms / max(1, total_execs),
+                    3,
+                ),
+                "avg_execution_time_ms": round(
+                    self.metrics.total_execution_time_ms / max(1, total_execs),
+                    3,
+                ),
             },
             "totals": {
                 "interesting_results": self.metrics.interesting_result_count,
@@ -503,6 +523,8 @@ class MetricsCollector:
         m = self.metrics
         execs_per_sec = m.total_executions / max(1.0, m.wall_time_secs)
         pass_rate = m.pass_count / max(1, m.total_executions)
+        avg_generation_ms = m.total_generation_time_ms / max(1, m.total_executions)
+        avg_execution_ms = m.total_execution_time_ms / max(1, m.total_executions)
         lines = [
             f"Target          : {m.target}",
             f"Eval mode req   : {self._run_metadata.get('evaluation_mode_requested', 'N/A')}",
@@ -510,8 +532,11 @@ class MetricsCollector:
             f"Wall time       : {m.wall_time_secs:.1f}s",
             f"Total execs     : {m.total_executions}",
             f"Execs/sec       : {execs_per_sec:.4f}",
+            f"Avg gen/test    : {avg_generation_ms:.3f} ms",
+            f"Avg run/test    : {avg_execution_ms:.3f} ms",
             f"Pass (clean)    : {m.pass_count} ({pass_rate:.1%})",
             f"Behaviors seen  : {m.behaviors_covered}",
+            f"Interesting tests: {m.interesting_test_case_count}",
             f"Interesting results: {m.interesting_result_count}",
             f"Unique bugs     : {m.unique_bug_count}",
             f"Traceback-unique: {m.traceback_unique_bugs}",

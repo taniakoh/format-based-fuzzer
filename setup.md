@@ -146,6 +146,46 @@ python main.py json --time-budget 300 --fresh-start
 python main.py all --time-budget 300 --fresh-start
 ```
 
+## Post-Run Analysis
+
+After the run completes, run these in order:
+
+```bash
+# 1. Stats summary (already written automatically)
+type results/ipv4/stats.txt
+
+# 2. Coverage plot (SVG)
+python evaluation/plot_progress.py ipv4
+python evaluation/plot_progress.py ipv6
+
+# 3. Traceback analysis
+python -m evaluation.traceback_analysis ipv4
+python -m evaluation.traceback_analysis ipv6
+
+# 4. ISTD evaluation graphs
+python evaluation/plot_istd_eval.py ipv4
+```
+
+## Example 3-Hour Hybrid DL Runs
+
+```bash
+python main.py ipv4 --evaluation-mode hybrid_dl --fresh-start --no-qemu --time-budget 10800 --seed 1
+python main.py ipv6 --evaluation-mode hybrid_dl --fresh-start --no-qemu --time-budget 10800 --seed 1
+python main.py cidrize --evaluation-mode hybrid_dl --fresh-start --no-qemu --time-budget 10800 --seed 1
+python main.py json --evaluation-mode hybrid_dl --fresh-start --no-qemu --time-budget 10800 --seed 1
+python main.py json_direct --evaluation-mode hybrid_dl --fresh-start --no-qemu --time-budget 10800 --seed 1
+```
+
+## Example 6-Hour Havoc-Only Runs
+
+```bash
+python main.py ipv4 --evaluation-mode havoc_only --fresh-start --no-qemu --time-budget 21600 --seed 1
+python main.py ipv6 --evaluation-mode havoc_only --fresh-start --no-qemu --time-budget 21600 --seed 1
+python main.py cidrize --evaluation-mode havoc_only --fresh-start --no-qemu --time-budget 21600 --seed 1
+python main.py json --evaluation-mode havoc_only --fresh-start --no-qemu --time-budget 21600 --seed 1
+python main.py json_direct --evaluation-mode havoc_only --fresh-start --no-qemu --time-budget 21600 --seed 1
+```
+
 ---
 
 ## Performance: Copy Linux Binaries to Native WSL Storage

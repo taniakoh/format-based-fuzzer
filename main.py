@@ -566,9 +566,9 @@ def _postprocess_atheris_results(
             writer = _csv.writer(f)
             writer.writerow([
                 "relative_time_sec", "total_execs", "behaviors_seen",
-                "corpus_size", "unique_bugs", "unique_crashes",
+                "interesting_test_cases", "corpus_size", "unique_bugs", "unique_crashes",
             ])
-            writer.writerow([round(duration, 3), 0, 0, 0, len(unique_bugs), total_crashes])
+            writer.writerow([round(duration, 3), 0, 0, 0, 0, len(unique_bugs), total_crashes])
 
     print(f"[*] Post-processed: {len(unique_bugs)} unique bugs, {total_crashes} crashes → results/{target}/")
 
@@ -820,6 +820,7 @@ def fuzz(
     _BUG_STAGNATION_STOP = 500   # suggest stopping after this many execs without a new unique bug
 
     while time.time() - start < time_budget_secs:
+        generation_clock = time.perf_counter()
         seed = corpus.select(priority_fn=scheduler.get_seed_priority)
         metrics.record_energy(seed, scheduler.get_seed_priority(seed))
 
@@ -865,6 +866,7 @@ def fuzz(
             )
             havoc_trace = tier3.consume_last_trace()
 
+        generation_ms = _elapsed_ms(generation_clock)
         execution_clock = time.perf_counter()
         if exec_count == 0:
             print("[*] First execution starting...")
@@ -884,6 +886,7 @@ def fuzz(
                 f"duration={execution_ms:7.1f} ms bug_type={result.bug_type}"
             )
 
+        metrics.record_timing(generation_ms, execution_ms)
         metrics.record_execution(mutated, result, bitmap)
 
         is_new = coverage.is_interesting(bitmap)
