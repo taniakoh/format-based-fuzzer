@@ -142,3 +142,16 @@ Reasons:
 
 Key files changed:
 - `requirements.txt`
+
+### Keep JSON fuzzing alive after oracle mismatches
+Improvements:
+- Changed the Atheris JSON harness to save mismatch reproducers and return cleanly instead of raising `AssertionError` and terminating the libFuzzer campaign.
+- Updated JSON post-processing to classify saved artifacts by replaying them through the oracle, including `wrong_exception_type` findings.
+
+Reasons:
+- The previous harness stopped the JSON campaign on the first discovered mismatch, which prevented continued in-vivo testing and meaningful progress-over-time evaluation.
+- Persisting the reproducer without aborting the process keeps bug discovery intact while allowing the fuzzer to continue exploring new inputs.
+
+Key files changed:
+- `fuzzer/json_atheris_harness.py`
+- `main.py`

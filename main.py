@@ -389,12 +389,9 @@ def _classify_atheris_crash(crash_file: Path) -> tuple[str, str]:
         return "TIMEOUT", "Buggy JSON decoder timed out"
     if name.startswith("oom-"):
         return "CRASH", "Out of memory"
-    if not name.startswith("crash-"):
-        return "CRASH", f"Unknown crash artifact: {name}"
 
     try:
         import json as _json
-        import traceback as _traceback
         data = crash_file.read_bytes()
 
         json_root = str(_HERE / "json-decoder-main")
@@ -422,6 +419,10 @@ def _classify_atheris_crash(crash_file: Path) -> tuple[str, str]:
             candidate_exc = exc
 
         if ref_ok and not candidate_ok:
+            if isinstance(candidate_exc, InvalidityBug):
+                return "wrong_exception_type", (
+                    f"buggy_json raised InvalidityBug but should raise JSONDecodeError: {candidate_exc}"
+                )
             return "validity", f"stdlib accepted, buggy_json rejected: {candidate_exc}"
         if not ref_ok and candidate_ok:
             return "oracle_mismatch", f"stdlib rejected, buggy_json accepted: {ref_exc}"

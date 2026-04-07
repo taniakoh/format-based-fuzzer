@@ -169,11 +169,14 @@ def _sigalrm_handler(signum, frame):
 
 
 def _record_oracle_mismatch(data: bytes, bug_type: str, exc_message: str) -> None:
-    """Write a unique oracle mismatch to logs/bug_counts.csv."""
+    """Write a unique oracle mismatch and save a reproducer without stopping fuzzing."""
     digest = hashlib.sha1(data).hexdigest()
     if digest not in _seen_crash_hashes:
         _seen_crash_hashes.add(digest)
-        _write_bug_counts_csv(bug_type, exc_message, f"crash-{digest}")
+        CRASHES_DIR.mkdir(parents=True, exist_ok=True)
+        artifact_path = CRASHES_DIR / f"{bug_type}-{digest}"
+        artifact_path.write_bytes(data)
+        _write_bug_counts_csv(bug_type, exc_message, artifact_path.name)
 
 
 @atheris.instrument_func
@@ -216,33 +219,26 @@ def test_one_input(data: bytes) -> None:
         return  # return cleanly so libFuzzer keeps running
     except (JSONDecodeError, InvalidityBug, UnicodeDecodeError, ValueError) as exc:
         if ref_ok:
-            msg = f"Oracle mismatch: stdlib accepted input, buggy_json rejected it: {exc}"
             _record_oracle_mismatch(data, "validity", str(exc))
-            raise AssertionError(msg) from exc
+            return
         # Both rejected — but if buggy_json raised the wrong exception type
         # (e.g. InvalidityBug instead of JSONDecodeError) that is itself a bug.
         if isinstance(exc, InvalidityBug):
-            msg = f"Wrong exception type: buggy_json raised InvalidityBug but should raise JSONDecodeError: {exc}"
             _record_oracle_mismatch(data, "wrong_exception_type", str(exc))
-            raise AssertionError(msg) from exc
+            return
         return
     finally:
         signal.alarm(0)
 
     if not ref_ok:
-        msg = f"Oracle mismatch: stdlib rejected input, buggy_json accepted it: {ref_exc}"
         _record_oracle_mismatch(data, "oracle_mismatch", str(ref_exc))
-        raise AssertionError(msg)
+        return
 
     normalized_candidate = _normalize_json_value(candidate_value)
     normalized_reference = _normalize_json_value(ref_value)
     if normalized_candidate != normalized_reference:
-        msg = (
-            "Oracle mismatch: decoded values differ between buggy_json and stdlib "
-            f"(buggy_json={normalized_candidate!r}, stdlib={normalized_reference!r})"
-        )
         _record_oracle_mismatch(data, "oracle_mismatch", "Decoded values differ")
-        raise AssertionError(msg)
+        return
 
 
 def main() -> None:
