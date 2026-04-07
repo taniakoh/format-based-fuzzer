@@ -60,6 +60,8 @@ _LINUX_BINARIES: dict[str, Path] = {
 
 _WINDOWS_ARGS: dict[str, list[str]] = {}
 _LINUX_ARGS: dict[str, list[str]] = {}
+_INPUT_ARGS: dict[str, str] = {}  # per-target input flag name (default: --ipstr)
+_INPUT_ENCODINGS: dict[str, str] = {}  # per-target input encoding: "cli_escape" (default) or "raw"
 
 
 def register_binary(
@@ -68,12 +70,17 @@ def register_binary(
     linux: str | Path | None = None,
     windows_args: list[str] | None = None,
     linux_args: list[str] | None = None,
+    input_arg: str | None = None,
+    input_encoding: str | None = None,
 ) -> None:
     """Register binary paths for a new target format.
 
     Call this before constructing an ``Executor`` for the target, or supply
     ``binary_windows`` / ``binary_linux`` keys in the format config JSON and
     let ``main.py`` call this automatically.
+
+    ``input_arg`` overrides the default ``--ipstr`` flag used to pass the fuzz
+    input to the binary (e.g. ``--str-json`` for json_decoder_stv.py).
     """
     if windows is not None:
         _WINDOWS_BINARIES[target.lower()] = Path(windows)
@@ -83,6 +90,10 @@ def register_binary(
         _WINDOWS_ARGS[target.lower()] = list(windows_args)
     if linux_args is not None:
         _LINUX_ARGS[target.lower()] = list(linux_args)
+    if input_arg is not None:
+        _INPUT_ARGS[target.lower()] = input_arg
+    if input_encoding is not None:
+        _INPUT_ENCODINGS[target.lower()] = input_encoding
 
 # ── Platform helpers ──────────────────────────────────────────────────────────
 
@@ -137,6 +148,7 @@ class BugType:
     INVALIDITY = "invalidity"
     SYNTACTIC  = "syntactic"
     RELIABILITY = "reliability"
+    PERFORMANCE = "performance"
     BONUS      = "bonus"
     CRASH      = "CRASH"
     TIMEOUT    = "TIMEOUT"
@@ -176,6 +188,7 @@ class RunResult:
             BugType.VALIDITY,
             BugType.BONUS,
             BugType.RELIABILITY,
+            BugType.PERFORMANCE,
             BugType.CRASH,
             BugType.TIMEOUT,
             BugType.ORACLE_MISMATCH,
@@ -236,8 +249,8 @@ def _taxonomy_tags(result: "RunResult") -> list[str]:
         tags.append("FunctionalBug")
     if result.is_crash or result.bug_type == BugType.RELIABILITY:
         tags.append("ReliabilityBug")
-        if result.bug_type == BugType.TIMEOUT:
-            tags.append("PerformanceBug")
+    if result.bug_type in (BugType.TIMEOUT, BugType.PERFORMANCE):
+        tags.append("PerformanceBug")
     if result.bug_type == BugType.BONUS:
         tags.append("Bonus/UntrackedBugs")
     if _is_boundary_input(result.input_str):
@@ -307,15 +320,17 @@ def _traceback_exception_type(traceback_text: str) -> str:
     return match.group(1)
 
 
-def _cli_safe_input(input_data: bytes) -> str:
+def _cli_safe_input(input_data: bytes, encoding: str = "cli_escape") -> str:
     """Render fuzz bytes as a CLI-safe text argument.
 
-    The parser targets accept text via ``--ipstr``. Some byte sequences, most
-    notably ``0x00``, cannot be transported through argv at all and would cause
-    Python's subprocess layer to fail before the target launches. We therefore
-    keep printable ASCII as-is and escape everything else into a stable textual
-    representation.
+    encoding="cli_escape" (default): unicode_escape — safe for all targets,
+        but double-escapes backslash sequences like \\b → \\\\b.
+    encoding="raw": latin-1 decode only — preserves JSON escape sequences
+        (\\b, \\f, \\t) so json_direct can trigger the performance bug.
+        Null bytes are stripped since argv cannot carry them.
     """
+    if encoding == "raw":
+        return input_data.replace(b"\x00", b"").decode("latin-1", errors="replace")
     return input_data.decode("latin-1", errors="replace").encode(
         "unicode_escape"
     ).decode("ascii")
@@ -447,6 +462,17 @@ class Executor:
             self._mode            = "Windows"
             self._afl_showmap     = None
 
+        # If the registered binary is a Python script, prepend sys.executable
+        # so it runs correctly without needing a shebang or execute bit.
+        if str(self.binary).endswith(".py"):
+            self._fixed_args = [str(self.binary)] + self._fixed_args
+            self.binary = Path(sys.executable)
+
+        # Input flag name — defaults to --ipstr, overridable per target
+        self._input_arg = _INPUT_ARGS.get(target, "--ipstr")
+        # Input encoding — defaults to cli_escape, use "raw" for JSON direct
+        self._input_encoding = _INPUT_ENCODINGS.get(target, "cli_escape")
+
     @property
     def mode(self) -> str:
         """One of 'QEMU', 'Linux', or 'Windows'."""
@@ -462,7 +488,7 @@ class Executor:
         -------
         (behavior_bitmap, crashed, result)
         """
-        input_str = _cli_safe_input(input_data)
+        input_str = _cli_safe_input(input_data, self._input_encoding)
 
         if self._mode == "QEMU":
             return self._run_with_qemu(input_str)
@@ -493,7 +519,7 @@ class Executor:
             "--",
             str(self.binary),
             *self._fixed_args,
-            f"--ipstr={input_str}",
+            f"{self._input_arg}={input_str}",
         ]
 
         try:
@@ -586,7 +612,7 @@ class Executor:
     # ── Shared binary runner (Linux-no-AFL and Windows) ───────────────────────
 
     def _run_binary(self, input_str: str) -> RunResult:
-        cmd = [str(self.binary), *self._fixed_args, f"--ipstr={input_str}"]
+        cmd = [str(self.binary), *self._fixed_args, f"{self._input_arg}={input_str}"]
         try:
             proc = subprocess.run(
                 cmd,
@@ -621,6 +647,8 @@ class Executor:
         if proc.returncode not in (0, 1):
             bug_type = BugType.CRASH
             exc_msg = _summarize_process_failure(stdout, stderr, proc.returncode)
+        elif _traceback_exception_type(tb) == "PerformanceBug":
+            bug_type = BugType.PERFORMANCE
         else:
             bug_type = BugType.PASS
 

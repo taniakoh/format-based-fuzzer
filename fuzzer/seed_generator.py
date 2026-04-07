@@ -178,6 +178,97 @@ class IPv6SeedGenerator(SeedGenerator):
         return addr.encode()
 
 
+@SeedGenerator.register("json")
+@SeedGenerator.register("json_direct")
+class JSONSeedGenerator(SeedGenerator):
+    """Generates structurally varied, valid JSON seeds.
+
+    Covers all value types, nesting depths, boundary numbers, unicode strings,
+    and edge cases that stress JSON parsers (empty containers, duplicate-ish
+    keys, floats, large integers, escape sequences).
+    """
+
+    BOUNDARY_INTS  = [0, 1, -1, 127, -128, 255, 256, -256,
+                      32767, -32768, 65535, 2**31 - 1, -(2**31),
+                      2**53, -(2**53), 2**63 - 1]
+    BOUNDARY_FLOATS = [0.0, 1.0, -1.0, 0.1, -0.1, 1e10, -1e10,
+                       1.7976931348623157e+308, 5e-324, float("inf")]
+    UNICODE_STRINGS = [
+        "", " ", "\t", "\n", "hello", "Hello, World!",
+        "café", "日本語", "中文", "한국어", "العربية",
+        "emoji: 😀🎉", "\u0000", "\uffff",
+        "line1\nline2", "tab\there", "quote\"here",
+        "backslash\\here", "null\x00byte",
+        "a" * 64, "a" * 256,
+    ]
+
+    def _random_string(self) -> str:
+        return random.choice(self.UNICODE_STRINGS)
+
+    def _random_scalar(self) -> object:
+        choice = random.randint(0, 4)
+        if choice == 0:
+            return random.choice(self.BOUNDARY_INTS)
+        if choice == 1:
+            f = random.choice(self.BOUNDARY_FLOATS)
+            if f != float("inf"):
+                return f
+            return 1e308
+        if choice == 2:
+            return self._random_string()
+        if choice == 3:
+            return random.choice([True, False])
+        return None
+
+    def _random_value(self, depth: int = 0) -> object:
+        if depth >= 4:
+            return self._random_scalar()
+        choice = random.randint(0, 5)
+        if choice == 0:
+            return {}
+        if choice == 1:
+            return []
+        if choice == 2:
+            n = random.choice([1, 2, 3, 5])
+            return {self._random_string(): self._random_value(depth + 1) for _ in range(n)}
+        if choice == 3:
+            n = random.choice([1, 2, 3, 5])
+            return [self._random_value(depth + 1) for _ in range(n)]
+        return self._random_scalar()
+
+    def _random_top_level(self) -> object:
+        """Top-level JSON must be any valid value per RFC 8259."""
+        kind = random.choice([
+            "object", "object", "object",   # weighted toward objects
+            "array", "array",
+            "string", "int", "float", "bool", "null",
+        ])
+        if kind == "object":
+            n = random.choice([0, 1, 2, 3, 5])
+            return {self._random_string(): self._random_value() for _ in range(n)}
+        if kind == "array":
+            n = random.choice([0, 1, 2, 3, 5])
+            return [self._random_value() for _ in range(n)]
+        if kind == "string":
+            return self._random_string()
+        if kind == "int":
+            return random.choice(self.BOUNDARY_INTS)
+        if kind == "float":
+            f = random.choice(self.BOUNDARY_FLOATS)
+            return f if f != float("inf") else 1e308
+        if kind == "bool":
+            return random.choice([True, False])
+        return None
+
+    def generate(self) -> bytes:
+        import json as _json
+        try:
+            value = self._random_top_level()
+            return _json.dumps(value, ensure_ascii=False).encode("utf-8")
+        except (ValueError, OverflowError):
+            return b"{}"
+
+
 @SeedGenerator.register("cidrize")
 class CidrizeSeedGenerator(SeedGenerator):
     """Generates valid mixed-notation IP strings for the cidrize target."""

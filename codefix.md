@@ -130,3 +130,15 @@ Reasons:
 Key files changed:
 - `fuzzer/executor.py`
 - `evaluation/collect_metrics.py`
+
+## 2026-04-07
+
+### Align SymPy with PyTorch 2.5.1 CUDA wheel
+Improvements:
+- Changed `requirements.txt` from `sympy==1.14.0` to `sympy==1.13.1` to match the dependency metadata required by `torch==2.5.1+cu121`.
+
+Reasons:
+- `uv pip install` could not resolve the environment because the selected PyTorch wheel requires `sympy==1.13.1` exactly.
+
+Key files changed:
+- `requirements.txt`

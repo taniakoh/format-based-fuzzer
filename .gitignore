@@ -12,6 +12,7 @@ codex-skills/
 # Virtual environments
 .venv/
 venv/
+fuzzer-venv/
 
 # Fuzzer runtime output
 corpus/
@@ -20,3 +21,4 @@ models/
 results/
 *_extracted/
 savedruns/
+fuzzer-venv/bin/activate.csh

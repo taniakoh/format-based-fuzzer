@@ -62,6 +62,66 @@ def load_rows(plot_path: Path) -> list[dict[str, float]]:
     return rows
 
 
+def load_atheris_rows(results_dir: Path) -> list[dict[str, float]]:
+    """Parse results/json/atheris.log into the same row format as plot_data.
+
+    libFuzzer emits lines like:
+        #2      INITED cov: 3 ft: 4 corp: 1/1b exec/s: 0 rss: 33Mb
+        #1024   pulse  cov: 5 ft: 7 corp: 2/15b exec/s: 1024 rss: 40Mb
+    Time is estimated by accumulating exec_count / exec_s deltas.
+    Unique bugs and crashes are read from the results directory.
+    """
+    import re
+    log_path = results_dir / "atheris.log"
+    if not log_path.exists():
+        return []
+
+    line_re = re.compile(
+        r"^#(\d+)\s+\S+\s+cov:\s*(\d+).*?corp:\s*(\d+)/.*?exec/s:\s*(\d+)",
+    )
+
+    crashes_dir = results_dir / "crashes"
+    bug_csv = results_dir / "logs" / "bug_counts.csv"
+
+    # Count unique crashes from the crashes directory
+    unique_crashes = len(list(crashes_dir.glob("*"))) if crashes_dir.exists() else 0
+    # Count unique bugs from bug_counts.csv
+    unique_bugs = 0
+    if bug_csv.exists():
+        with bug_csv.open("r", encoding="utf-8") as f:
+            unique_bugs = sum(1 for row in csv.DictReader(f))
+
+    rows: list[dict[str, float]] = []
+    rel_time = 0.0
+    prev_execs = 0
+
+    with log_path.open("r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            m = line_re.match(line.strip())
+            if not m:
+                continue
+            execs = int(m.group(1))
+            cov = int(m.group(2))
+            corp = int(m.group(3))
+            exec_s = int(m.group(4))
+
+            delta = execs - prev_execs
+            if exec_s > 0:
+                rel_time += delta / exec_s
+            prev_execs = execs
+
+            rows.append({
+                "relative_time_sec": rel_time,
+                "total_execs": float(execs),
+                "behaviors_seen": float(cov),
+                "corpus_size": float(corp),
+                "unique_bugs": float(unique_bugs),
+                "unique_crashes": float(unique_crashes),
+            })
+
+    return rows
+
+
 def load_dl_rows(results_dir: Path) -> list[dict[str, float]]:
     """Load DL training events from dl_training.jsonl if present."""
     dl_path = results_dir / "dl_training.jsonl"
@@ -217,10 +277,27 @@ def render_empty_svg(title: str) -> str:
 
 def main() -> None:
     args = parse_args()
-    plot_path, output_path = resolve_paths(args.target_or_plot_data, args.output)
-    rows = load_rows(plot_path)
-    dl_rows = load_dl_rows(plot_path.parent)
-    title = f"Fuzzer Progress: {plot_path.parent.name}"
+
+    # Check if this is an Atheris target (plot_data absent, atheris.log present)
+    target_path = Path(args.target_or_plot_data)
+    results_dir = (
+        target_path if target_path.is_dir()
+        else RESULTS_DIR / args.target_or_plot_data
+    )
+    atheris_log = results_dir / "atheris.log"
+    plot_data = results_dir / "plot_data"
+
+    if atheris_log.exists():
+        rows = load_atheris_rows(results_dir)
+        output_path = Path(args.output) if args.output else results_dir / "progress.svg"
+        title = f"Fuzzer Progress (Atheris): {results_dir.name}"
+    else:
+        plot_path, output_path = resolve_paths(args.target_or_plot_data, args.output)
+        rows = load_rows(plot_path)
+        title = f"Fuzzer Progress: {plot_path.parent.name}"
+        results_dir = plot_path.parent
+
+    dl_rows = load_dl_rows(results_dir)
     svg = render_svg(rows, title, dl_rows=dl_rows or None)
     output_path.write_text(svg, encoding="utf-8")
     print(f"Wrote {output_path}")

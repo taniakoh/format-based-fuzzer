@@ -28,12 +28,14 @@ Options:
 
 import argparse
 import concurrent.futures
+import hashlib
 import json
 import os
 import random
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -112,6 +114,127 @@ def _write_seed_corpus(seeds: list[bytes], out_dir: Path) -> int:
     return written
 
 
+def _init_dl_for_atheris(
+    target: str,
+    fmt: dict,
+    weights_path: Path,
+) -> tuple:
+    """Initialise the DL surrogate for an Atheris target.
+
+    Returns (model, scheduler, device) on success, or (None, None, None) if
+    torch is not available.  The initial operator weights are written to
+    ``weights_path`` so the harness can read them immediately.
+    """
+    try:
+        import torch
+        from dl.surrogate import CoverageSurrogate, DLScheduler
+        from dl.trainer import load_checkpoint
+        from dl.trustworthiness import is_trustworthy
+
+        model = CoverageSurrogate()
+        model._optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+        scheduler = DLScheduler(model, is_trustworthy, fmt)
+        load_checkpoint(model, target, scheduler.device)
+        model.eval()
+
+        weights = scheduler.get_operator_weights(b"")
+        weights_path.write_text(json.dumps(weights, indent=2), encoding="utf-8")
+        print(f"[DL-Atheris] Surrogate ready (device={scheduler.device})")
+        return model, scheduler, scheduler.device
+    except ImportError:
+        print("[DL-Atheris] torch not available — running without DL guidance")
+        return None, None, None
+
+
+def _dl_monitor_atheris(
+    model,
+    scheduler,
+    device,
+    target: str,
+    corpus_dir: Path,
+    crashes_dir: Path,
+    weights_path: Path,
+    stop_event: threading.Event,
+) -> None:
+    """Background thread: watches for new corpus/crash files, retrains the
+    surrogate, and writes updated operator weights for the harness to pick up."""
+    from dl.trainer import compute_misprediction_rate, save_checkpoint, train
+
+    POLL_INTERVAL = 30  # seconds between checks
+    seen_files: set[Path] = set(corpus_dir.glob("*")) | set(crashes_dir.glob("*"))
+    training_buffer: list[tuple[bytes, list[int]]] = []
+    rounds = 0
+    run_start = time.time()
+    dl_training_path = corpus_dir.parent / "dl_training.jsonl"
+    dl_summary_path = corpus_dir.parent / "dl_summary.json"
+    dl_training_path.write_text("", encoding="utf-8")
+
+    while not stop_event.is_set():
+        stop_event.wait(POLL_INTERVAL)
+        if stop_event.is_set():
+            break
+
+        new_files: list[Path] = []
+        for f in list(corpus_dir.glob("*")) + list(crashes_dir.glob("*")):
+            if f.is_file() and f not in seen_files:
+                seen_files.add(f)
+                new_files.append(f)
+
+        if not new_files:
+            continue
+
+        # Build synthetic bitmaps: hash (crash/corpus + content) to bitmap slots
+        for f in new_files:
+            try:
+                data = f.read_bytes()
+            except OSError:
+                continue
+            kind = "crash" if f.parent == crashes_dir else "corpus"
+            key = f"{kind}|{hashlib.sha256(data).hexdigest()}"
+            digest = hashlib.sha256(key.encode()).digest()
+            pos = (digest[0] << 8 | digest[1]) % 65536
+            bitmap_positions = [pos]
+            if kind == "crash":
+                pos2 = (digest[2] << 8 | digest[3]) % 65536
+                bitmap_positions.append(pos2)
+            training_buffer.append((data, bitmap_positions))
+
+        print(f"[DL-Atheris] Training on {len(training_buffer)} samples ({len(new_files)} new)...")
+        try:
+            misprediction_rate = compute_misprediction_rate(model, training_buffer, device=device)
+            loss = train(model, training_buffer, epochs=5, device=device,
+                         optimizer=model._optimizer)
+            scheduler.record_training(len(training_buffer), loss)
+            rounds += 1
+
+            weights = scheduler.get_operator_weights(b"")
+            weights_path.write_text(json.dumps(weights, indent=2), encoding="utf-8")
+            save_checkpoint(model, target, metadata=scheduler.export_runtime_metadata())
+            print(f"[DL-Atheris] Round {rounds} done. Loss={loss:.4f}  misprediction={misprediction_rate:.3f}  weights written.")
+
+            with open(dl_training_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps({
+                    "round": rounds,
+                    "relative_time_sec": round(time.time() - run_start, 3),
+                    "loss": loss,
+                    "misprediction_rate": misprediction_rate,
+                    "training_buffer_size": len(training_buffer),
+                    "new_files": len(new_files),
+                    "operator_weights": weights,
+                }) + "\n")
+
+            dl_summary_path.write_text(json.dumps({
+                "target": target,
+                "dl_enabled": True,
+                "training_rounds_this_run": rounds,
+                "latest_loss": loss,
+                "latest_misprediction_rate": misprediction_rate,
+                "operator_weights": weights,
+            }, indent=2), encoding="utf-8")
+        except Exception as exc:
+            print(f"[DL-Atheris] Training error: {exc}")
+
+
 def _run_atheris_target(
     target: str,
     fmt: dict,
@@ -138,6 +261,11 @@ def _run_atheris_target(
     crashes_dir.mkdir(parents=True, exist_ok=True)
     written_seed_count = _write_seed_corpus(seeds, corpus_dir)
 
+    # ── DL initialisation ─────────────────────────────────────────────────────
+    dl_weights_path = results_dir / "dl_weights.json"
+    dl_model, dl_scheduler, dl_device = _init_dl_for_atheris(target, fmt, dl_weights_path)
+    dl_enabled = dl_model is not None
+
     config_payload = {
         "target": target,
         "time_budget_secs": time_budget_secs,
@@ -146,9 +274,9 @@ def _run_atheris_target(
         "evaluation_mode_resolved": evaluation_mode_resolved,
         "executor_mode": "Atheris",
         "binary_path": None,
-        "scheduler": "Atheris/libFuzzer",
+        "scheduler": "DLScheduler+Atheris/libFuzzer" if dl_enabled else "Atheris/libFuzzer",
         "scheduler_mode": "atheris",
-        "dl_enabled": False,
+        "dl_enabled": dl_enabled,
         "checkpoint_loaded": False,
         "checkpoint_metadata": {},
         "format_config": fmt,
@@ -163,12 +291,14 @@ def _run_atheris_target(
 
     cmd = [
         sys.executable,
+        "-u",
         str(_HERE / "fuzzer" / "json_atheris_harness.py"),
         str(corpus_dir),
         f"-artifact_prefix={str(crashes_dir)}{os.sep}",
         f"-max_total_time={time_budget_secs}",
         "-print_final_stats=1",
         "-timeout=5",
+        "-ignore_timeouts=1",
     ]
     env = os.environ.copy()
     current_pythonpath = env.get("PYTHONPATH", "")
@@ -177,10 +307,25 @@ def _run_atheris_target(
         if not current_pythonpath
         else str(_HERE) + os.pathsep + current_pythonpath
     )
+    env["PYTHONUNBUFFERED"] = "1"
+    if dl_enabled:
+        env["ATHERIS_DL_WEIGHTS"] = str(dl_weights_path)
 
     print(f"[*] Harness       : {cmd[0]} {cmd[1]}")
     print(f"[*] Seed files    : {written_seed_count}")
     print(f"[*] Crash dir     : {crashes_dir}")
+    print(f"[*] DL guidance   : {'enabled' if dl_enabled else 'disabled'}")
+
+    # ── Start DL monitor thread ────────────────────────────────────────────────
+    stop_event = threading.Event()
+    if dl_enabled:
+        monitor_thread = threading.Thread(
+            target=_dl_monitor_atheris,
+            args=(dl_model, dl_scheduler, dl_device, target,
+                  corpus_dir, crashes_dir, dl_weights_path, stop_event),
+            daemon=True,
+        )
+        monitor_thread.start()
 
     start = time.time()
     with open(log_path, "w", encoding="utf-8") as log_file:
@@ -199,6 +344,8 @@ def _run_atheris_target(
             print(line, end="")
             log_file.write(line)
         return_code = proc.wait()
+
+    stop_event.set()
 
     crash_count = len(list(crashes_dir.glob("*")))
     corpus_count = len(list(corpus_dir.glob("*")))
@@ -231,7 +378,199 @@ def _run_atheris_target(
             f"See {log_path} for details."
         )
 
+    _postprocess_atheris_results(target, results_dir, crashes_dir, duration)
     print("\n".join(stats_lines))
+
+
+def _classify_atheris_crash(crash_file: Path) -> tuple[str, str]:
+    """Re-run one Atheris crash input through the oracle and return (bug_type, exc_msg)."""
+    name = crash_file.name
+    if name.startswith("timeout-") or name.startswith("slow-"):
+        return "TIMEOUT", "Buggy JSON decoder timed out"
+    if name.startswith("oom-"):
+        return "CRASH", "Out of memory"
+    if not name.startswith("crash-"):
+        return "CRASH", f"Unknown crash artifact: {name}"
+
+    try:
+        import json as _json
+        import traceback as _traceback
+        data = crash_file.read_bytes()
+
+        json_root = str(_HERE / "json-decoder-main")
+        if json_root not in sys.path:
+            sys.path.insert(0, json_root)
+        from buggy_json import loads as buggy_loads  # type: ignore
+        from buggy_json.decoder_stv import InvalidityBug, JSONDecodeError, PerformanceBug  # type: ignore
+
+        try:
+            ref_value = _json.loads(data)
+            ref_ok = True
+            ref_exc = None
+        except Exception as exc:
+            ref_ok = False
+            ref_exc = exc
+
+        try:
+            candidate_value = buggy_loads(data)
+            candidate_ok = True
+            candidate_exc = None
+        except PerformanceBug as exc:
+            return "TIMEOUT", f"PerformanceBug: {exc}"
+        except (JSONDecodeError, InvalidityBug, UnicodeDecodeError, ValueError) as exc:
+            candidate_ok = False
+            candidate_exc = exc
+
+        if ref_ok and not candidate_ok:
+            return "validity", f"stdlib accepted, buggy_json rejected: {candidate_exc}"
+        if not ref_ok and candidate_ok:
+            return "oracle_mismatch", f"stdlib rejected, buggy_json accepted: {ref_exc}"
+        if ref_ok and candidate_ok:
+            return "oracle_mismatch", "Decoded values differ between buggy_json and stdlib"
+        return "invalidity", "Both stdlib and buggy_json rejected the input"
+    except Exception as exc:
+        return "CRASH", f"Re-classification failed: {exc}"
+
+
+def _postprocess_atheris_results(
+    target: str,
+    results_dir: Path,
+    crashes_dir: Path,
+    duration: float,
+) -> None:
+    """Generate structured result files from Atheris crash artifacts to match ipv4/ipv6 output."""
+    import csv as _csv
+    import hashlib as _hashlib
+
+    logs_dir = results_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+
+    crash_files = [f for f in crashes_dir.glob("*") if f.is_file()]
+
+    unique_bugs: dict[str, dict] = {}
+    unique_findings: dict[str, dict] = {}
+    bug_type_counts: dict[str, int] = {}
+
+    for crash_file in crash_files:
+        try:
+            raw = crash_file.read_bytes()
+            input_str = raw.decode("latin-1", errors="replace")
+        except Exception:
+            continue
+
+        bug_type, exc_msg = _classify_atheris_crash(crash_file)
+        sig_key = _hashlib.sha256(f"{bug_type}|{exc_msg}".encode()).hexdigest()[:32]
+        bug_type_counts[bug_type] = bug_type_counts.get(bug_type, 0) + 1
+
+        entry = {
+            "bug_type": bug_type,
+            "exception": exc_msg,
+            "example_input": input_str,
+            "crash_file": crash_file.name,
+            "first_seen_exec": 0,
+            "exit_code": None,
+            "stdout": "",
+            "stderr": "",
+            "traceback": "",
+            "oracle": {
+                "supported": False,
+                "expected_valid": None,
+                "reason": "",
+                "shape": "",
+                "normalized": None,
+            },
+            "classification": {
+                "parser_reported_bug_type": None,
+                "parser_reported_message": "",
+                "taxonomy_tags": [bug_type],
+            },
+            "signature": {
+                "bug_type": bug_type,
+                "exception": exc_msg,
+                "bitmap_digest": "",
+            },
+        }
+        unique_findings[sig_key] = entry
+        if bug_type not in ("invalidity",):
+            unique_bugs[sig_key] = entry
+
+    # bugs.jsonl
+    bugs_jsonl = results_dir / "bugs.jsonl"
+    with open(bugs_jsonl, "w", encoding="utf-8") as f:
+        for entry in unique_bugs.values():
+            f.write(json.dumps(entry) + "\n")
+
+    # unique_bugs.json
+    (results_dir / "unique_bugs.json").write_text(
+        json.dumps({
+            "target": target,
+            "unique_bug_count": len(unique_bugs),
+            "entries": list(unique_bugs.values()),
+        }, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    # unique_findings.json
+    (results_dir / "unique_findings.json").write_text(
+        json.dumps({
+            "target": target,
+            "unique_finding_count": len(unique_findings),
+            "entries": list(unique_findings.values()),
+        }, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    # bug_coverage_summary.json
+    total_crashes = len(crash_files)
+    (results_dir / "bug_coverage_summary.json").write_text(
+        json.dumps({
+            "target": target,
+            "run_scalars": {
+                "wall_time_secs": round(duration, 1),
+                "total_executions": "Atheris-managed",
+                "execs_per_sec": "Atheris-managed",
+                "behaviors_seen": "Atheris-managed",
+                "corpus_size": "Atheris-managed",
+            },
+            "totals": {
+                "unique_findings": len(unique_findings),
+                "unique_real_bugs": len(unique_bugs),
+                "unique_crashes": total_crashes,
+            },
+            "by_bug_type": {
+                "total": bug_type_counts,
+                "unique": {k: 1 for k in bug_type_counts},
+            },
+        }, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    # logs/bug_counts.csv  (matches ipv4/ipv6 format)
+    with open(logs_dir / "bug_counts.csv", "w", encoding="utf-8", newline="") as f:
+        writer = _csv.writer(f)
+        writer.writerow(["bug_type", "exc_type", "exc_message", "filename", "lineno", "count"])
+        for entry in unique_findings.values():
+            writer.writerow([
+                entry["bug_type"],
+                "",
+                entry["exception"],
+                entry["crash_file"],
+                "",
+                1,
+            ])
+
+    # minimal plot_data CSV so plot_progress.py can render a chart
+    plot_path = results_dir / "plot_data"
+    if not plot_path.exists():
+        with open(plot_path, "w", encoding="utf-8", newline="") as f:
+            writer = _csv.writer(f)
+            writer.writerow([
+                "relative_time_sec", "total_execs", "behaviors_seen",
+                "corpus_size", "unique_bugs", "unique_crashes",
+            ])
+            writer.writerow([round(duration, 3), 0, 0, 0, len(unique_bugs), total_crashes])
+
+    print(f"[*] Post-processed: {len(unique_bugs)} unique bugs, {total_crashes} crashes → results/{target}/")
 
 
 def _elapsed_ms(start_time: float) -> float:
@@ -323,10 +662,12 @@ def fuzz(
     if fmt.get("binary_windows") or fmt.get("binary_linux"):
         register_binary(
             target,
-            windows=fmt.get("binary_windows"),
-            linux=fmt.get("binary_linux"),
+            windows=_HERE / fmt["binary_windows"] if fmt.get("binary_windows") else None,
+            linux=_HERE / fmt["binary_linux"] if fmt.get("binary_linux") else None,
             windows_args=fmt.get("binary_windows_args"),
             linux_args=fmt.get("binary_linux_args"),
+            input_arg=fmt.get("binary_input_arg"),
+            input_encoding=fmt.get("binary_input_encoding"),
         )
 
     phase_clock = time.perf_counter()
@@ -836,7 +1177,7 @@ def main() -> None:
     )
 
     if args.target == "all":
-        targets = ["ipv4", "ipv6", "cidrize"]
+        targets = ["ipv4", "ipv6", "cidrize", "json"]
         print(f"[*] Running {len(targets)} targets in parallel: {targets}")
         worker_kwargs = [{"target": t, "rng_seed": args.seed, **fuzz_kwargs} for t in targets]
         with concurrent.futures.ProcessPoolExecutor(max_workers=len(targets)) as pool:

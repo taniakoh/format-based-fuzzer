@@ -256,6 +256,7 @@ def get_mutator(format_name: str, fmt_config: dict | None = None) -> SemanticMut
 
 
 @SemanticMutator.register("json")
+@SemanticMutator.register("json_direct")
 class JSONSemanticMutator(SemanticMutator):
     OPERATIONS = [
         "literal_swap",
@@ -664,6 +665,7 @@ class IPv6SemanticMutator(SemanticMutator):
         "leading_zeros",
         "zone_id",
         "multiple_double_colons",
+        "colon_run",
         "empty_group",
         "whitespace_injection",
     ]
@@ -822,6 +824,38 @@ class IPv6SemanticMutator(SemanticMutator):
         spans = self.get_semantic_spans(data)
         pos = self._guided_insert_position(s, hot_bytes, preferred_fields, spans)
         return (s[:pos] + "::" + s[pos:]).encode(), self._field_for_position(
+            spans, pos, default="group1"
+        )
+
+    def _colon_run(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        """Replace an existing colon separator with a run of 2–4 colons.
+
+        Targets the separator positions directly so the run lands between
+        two real groups, which is the only path that survives the
+        pyparsing grammar and reaches the token-processing logic.
+        """
+        s = self._decode(data)
+        spans = self.get_semantic_spans(data)
+        colon_positions = [i for i, ch in enumerate(s) if ch == ":"]
+        if not colon_positions:
+            return data, "group1"
+        if hot_bytes:
+            normalized = self._normalize_hot_bytes(hot_bytes, len(s))
+            if normalized:
+                best = min(colon_positions, key=lambda p: min(abs(p - h) for h in normalized))
+                pos = best
+            else:
+                pos = random.choice(colon_positions)
+        else:
+            pos = random.choice(colon_positions)
+        n = random.choice([2, 3, 4])
+        replacement = ":" * n
+        return (s[:pos] + replacement + s[pos + 1:]).encode(), self._field_for_position(
             spans, pos, default="group1"
         )
 

@@ -31,7 +31,13 @@
       "Bash(python -c \"import uncompyle6; print\\('uncompyle6 ok'\\)\")",
       "Bash(python -m decompyle3 linux-ipv4-parser_extracted/ipv4_parser_stv.pyc)",
       "Bash(python -c \"import decompile3\")",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(C:/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/cidrize-runner-main/bin/win-cidrize-runner.exe --help)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -v __pycache__ find \"C:/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer\" -name \"buggy_ipyparse\" -type d)",
+      "Bash(sed -n '370,400p' \"C:/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/fuzzer/mutation/tier2_semantic.py\")",
+      "Bash(sed -n '810,850p' \"C:/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/fuzzer/mutation/tier2_semantic.py\")",
+      "Bash(sort -t',' -k4 -rn)"
     ]
   }
 }

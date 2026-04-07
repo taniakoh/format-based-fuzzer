@@ -96,6 +96,7 @@ class FuzzMetrics:
     invalidity_count: int = 0
     oracle_unknown_accepts: int = 0
     oracle_unknown_rejects: int = 0
+    performance_bugs: int = 0
     total_executions: int = 0
     time_to_first_interesting_result: float | None = None
     exec_to_first_interesting_result: int | None = None
@@ -270,6 +271,8 @@ class MetricsCollector:
             self.metrics.oracle_unknown_accepts += 1
         elif result.bug_type == BugType.ORACLE_UNKNOWN_REJECT:
             self.metrics.oracle_unknown_rejects += 1
+        elif result.bug_type == BugType.PERFORMANCE:
+            self.metrics.performance_bugs += 1
         elif result.is_crash:
             crash_signature = signature_key
             if crash_signature not in self._crash_signatures:
@@ -518,6 +521,7 @@ class MetricsCollector:
             f"Invalidity count: {m.invalidity_count}",
             f"Oracle unknown accept: {m.oracle_unknown_accepts}",
             f"Oracle unknown reject: {m.oracle_unknown_rejects}",
+            f"Performance bugs: {m.performance_bugs}",
             f"Unique crashes  : {m.unique_crashes}",
             (
                 f"Time-to-1st-interesting: {m.time_to_first_interesting_result:.1f}s"

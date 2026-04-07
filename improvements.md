@@ -422,3 +422,17 @@ Reasons:
 
 Key files changed:
 - `evaluation/plot_progress.py`
+
+## 2026-04-07
+
+### Refresh pinned dependency set
+Improvements:
+- Updated `requirements.txt` to use the requested CUDA 12.1 PyTorch stack and aligned supporting package pins.
+- Relaxed `setuptools` to a minimum version constraint instead of a single exact pin.
+
+Reasons:
+- Keeps the project dependency set consistent with the requested runtime and wheel variants.
+- Avoids over-constraining `setuptools` while preserving the intended lower bound.
+
+Key files changed:
+- `requirements.txt`
