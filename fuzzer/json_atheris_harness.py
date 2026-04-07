@@ -81,7 +81,7 @@ from fuzzer.mutation.tier3_havoc import HavocMutator
 
 with atheris.instrument_imports(include=["buggy_json"]):
     from buggy_json import loads
-    from buggy_json.decoder_stv import InvalidityBug, JSONDecodeError
+    from buggy_json.decoder_stv import InvalidityBug, JSONDecodeError, PerformanceBug
 
 
 FMT = load_format("json")
@@ -217,6 +217,9 @@ def test_one_input(data: bytes) -> None:
                 _KNOWN_TIMEOUT_PATTERNS.append(ng)
 
         return  # return cleanly so libFuzzer keeps running
+    except PerformanceBug as exc:
+        _record_oracle_mismatch(data, "performance_bug", str(exc))
+        return
     except (JSONDecodeError, InvalidityBug, UnicodeDecodeError, ValueError) as exc:
         if ref_ok:
             _record_oracle_mismatch(data, "validity", str(exc))
