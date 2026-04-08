@@ -83,14 +83,25 @@ def _resolve_evaluation_mode(
         return "static_payoff"
 
 
-def _reset_target_state(target: str) -> None:
+def _run_dir(target: str, run_id: str) -> Path:
+    """Return the results directory for a given target and optional run_id."""
+    return _HERE / "results" / (f"{target}_{run_id}" if run_id else target)
+
+
+def _checkpoint_key(target: str, run_id: str) -> str:
+    """Return the model checkpoint key for a given target and optional run_id."""
+    return f"{target}_{run_id}" if run_id else target
+
+
+def _reset_target_state(target: str, run_id: str = "") -> None:
     """Remove prior run artifacts and model checkpoint for a clean restart."""
-    results_dir = _HERE / "results" / target
+    results_dir = _run_dir(target, run_id)
     if results_dir.exists():
         shutil.rmtree(results_dir)
         print(f"[*] Fresh start   : cleared {results_dir}")
 
-    checkpoint_path = _HERE / "models" / f"{target}_surrogate.pt"
+    ck = _checkpoint_key(target, run_id)
+    checkpoint_path = _HERE / "models" / f"{ck}_surrogate.pt"
     if checkpoint_path.exists():
         checkpoint_path.unlink()
         print(f"[*] Fresh start   : removed {checkpoint_path}")
@@ -118,6 +129,7 @@ def _init_dl_for_atheris(
     target: str,
     fmt: dict,
     weights_path: Path,
+    run_id: str = "",
 ) -> tuple:
     """Initialise the DL surrogate for an Atheris target.
 
@@ -134,7 +146,7 @@ def _init_dl_for_atheris(
         model = CoverageSurrogate()
         model._optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
         scheduler = DLScheduler(model, is_trustworthy, fmt)
-        load_checkpoint(model, target, scheduler.device)
+        load_checkpoint(model, _checkpoint_key(target, run_id), scheduler.device)
         model.eval()
 
         weights = scheduler.get_operator_weights(b"")
@@ -155,6 +167,7 @@ def _dl_monitor_atheris(
     crashes_dir: Path,
     weights_path: Path,
     stop_event: threading.Event,
+    run_id: str = "",
 ) -> None:
     """Background thread: watches for new corpus/crash files, retrains the
     surrogate, and writes updated operator weights for the harness to pick up."""
@@ -209,7 +222,7 @@ def _dl_monitor_atheris(
 
             weights = scheduler.get_operator_weights(b"")
             weights_path.write_text(json.dumps(weights, indent=2), encoding="utf-8")
-            save_checkpoint(model, target, metadata=scheduler.export_runtime_metadata())
+            save_checkpoint(model, _checkpoint_key(target, run_id), metadata=scheduler.export_runtime_metadata())
             print(f"[DL-Atheris] Round {rounds} done. Loss={loss:.4f}  misprediction={misprediction_rate:.3f}  weights written.")
 
             with open(dl_training_path, "a", encoding="utf-8") as f:
@@ -243,6 +256,7 @@ def _run_atheris_target(
     seeds_n: int,
     evaluation_mode_requested: str,
     evaluation_mode_resolved: str,
+    run_id: str = "",
 ) -> None:
     """Run an Atheris-backed target in a subprocess-managed campaign."""
     print("[*] Instrumentation: atheris")
@@ -252,7 +266,7 @@ def _run_atheris_target(
     seeds = generator.generate_corpus(n=seeds_n)
     print(f"[*] Seed corpus   : {len(seeds)} generated ({_elapsed_ms(phase_clock):7.1f} ms)")
 
-    results_dir = _HERE / "results" / target
+    results_dir = _run_dir(target, run_id)
     corpus_dir = results_dir / "atheris_corpus"
     crashes_dir = results_dir / "crashes"
     log_path = results_dir / "atheris.log"
@@ -263,7 +277,7 @@ def _run_atheris_target(
 
     # ── DL initialisation ─────────────────────────────────────────────────────
     dl_weights_path = results_dir / "dl_weights.json"
-    dl_model, dl_scheduler, dl_device = _init_dl_for_atheris(target, fmt, dl_weights_path)
+    dl_model, dl_scheduler, dl_device = _init_dl_for_atheris(target, fmt, dl_weights_path, run_id=run_id)
     dl_enabled = dl_model is not None
 
     config_payload = {
@@ -322,7 +336,7 @@ def _run_atheris_target(
         monitor_thread = threading.Thread(
             target=_dl_monitor_atheris,
             args=(dl_model, dl_scheduler, dl_device, target,
-                  corpus_dir, crashes_dir, dl_weights_path, stop_event),
+                  corpus_dir, crashes_dir, dl_weights_path, stop_event, run_id),
             daemon=True,
         )
         monitor_thread.start()
@@ -626,11 +640,13 @@ def fuzz(
     no_retrain: bool = False,
     fixed_lr: bool = False,
     no_qemu: bool = False,
+    run_id: str = "",
 ) -> None:
     """Run the hybrid fuzzer against one target."""
 
+    label = f"{target}_{run_id}" if run_id else target
     print(f"\n{'=' * 60}")
-    print(f"[*] Target        : {target}")
+    print(f"[*] Target        : {label}")
     print(f"[*] Time budget   : {time_budget_secs}s")
     print(f"[*] Havoc iters   : {havoc_iters}")
     print(f"{'=' * 60}\n")
@@ -638,7 +654,7 @@ def fuzz(
     startup_clock = time.perf_counter()
 
     if fresh_start:
-        _reset_target_state(target)
+        _reset_target_state(target, run_id)
 
     resolved_mode = _resolve_evaluation_mode(
         evaluation_mode,
@@ -657,6 +673,7 @@ def fuzz(
             seeds_n=seeds_n,
             evaluation_mode_requested=evaluation_mode,
             evaluation_mode_resolved="atheris",
+            run_id=run_id,
         )
         return
 
@@ -719,7 +736,7 @@ def fuzz(
             model = CoverageSurrogate()
             model._optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
             scheduler = DLScheduler(model, is_trustworthy, fmt)
-            checkpoint_state = load_checkpoint(model, target, scheduler.device)
+            checkpoint_state = load_checkpoint(model, _checkpoint_key(target, run_id), scheduler.device)
             checkpoint_loaded = bool(checkpoint_state.get("loaded"))
             checkpoint_metadata = _json_safe_metadata(checkpoint_state.get("metadata"))
             scheduler.load_runtime_metadata(checkpoint_state.get("metadata"))
@@ -747,7 +764,7 @@ def fuzz(
     phase_clock = time.perf_counter()
     executor = Executor(target, use_qemu=not no_qemu)
     coverage = CoverageAnalyzer()
-    metrics = MetricsCollector(target)
+    metrics = MetricsCollector(target, out_dir=_run_dir(target, run_id))
 
     print(f"[*] Executor mode : {executor.mode} ({_elapsed_ms(phase_clock):7.1f} ms)")
     print(f"[*] Binary path   : {executor.binary}")
@@ -986,7 +1003,7 @@ def fuzz(
                 )
                 save_checkpoint(
                     model,
-                    target,
+                    _checkpoint_key(target, run_id),
                     metadata=scheduler.export_runtime_metadata(),
                 )
                 print(f"[DL] Training done. Loss={loss:.4f}")
@@ -1036,7 +1053,7 @@ def fuzz(
         )
         save_checkpoint(
             model,
-            target,
+            _checkpoint_key(target, run_id),
             metadata=scheduler.export_runtime_metadata(),
         )
         print(f"[DL] Final loss={loss:.4f}")
@@ -1163,6 +1180,17 @@ def main() -> None:
         action="store_true",
         help="Disable QEMU mode and use Linux behavior-hash mode instead",
     )
+    parser.add_argument(
+        "--instances",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Run N parallel instances of each target, each with a distinct RNG seed "
+            "and writing to results/<target>_run1/, results/<target>_run2/, … "
+            "(default: 1, writes to results/<target>/)"
+        ),
+    )
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -1180,30 +1208,48 @@ def main() -> None:
         no_qemu=args.no_qemu,
     )
 
+    def _expand_worker_kwargs(targets: list[str]) -> list[dict]:
+        """Expand a list of targets by --instances, assigning unique run_ids and seeds."""
+        instances = args.instances
+        if instances <= 1:
+            return [{"target": t, "rng_seed": args.seed, **fuzz_kwargs} for t in targets]
+        result = []
+        for t in targets:
+            for i in range(1, instances + 1):
+                result.append({
+                    "target": t,
+                    "run_id": f"run{i}",
+                    "rng_seed": args.seed + i - 1,
+                    **fuzz_kwargs,
+                })
+        return result
+
+    def _run_parallel(worker_kwargs_list: list[dict]) -> None:
+        labels = [
+            f"{kw['target']}_{kw['run_id']}" if kw.get("run_id") else kw["target"]
+            for kw in worker_kwargs_list
+        ]
+        print(f"[*] Running {len(labels)} workers in parallel: {labels}")
+        with concurrent.futures.ProcessPoolExecutor(max_workers=len(worker_kwargs_list)) as pool:
+            futures = {pool.submit(_fuzz_worker, kw): label for kw, label in zip(worker_kwargs_list, labels)}
+            for fut in concurrent.futures.as_completed(futures):
+                label = futures[fut]
+                try:
+                    fut.result()
+                except Exception as exc:
+                    print(f"[ERROR] {label} failed: {exc}")
+
     if args.target == "all":
         targets = ["ipv4", "ipv6", "cidrize", "json"]
-        print(f"[*] Running {len(targets)} targets in parallel: {targets}")
-        worker_kwargs = [{"target": t, "rng_seed": args.seed, **fuzz_kwargs} for t in targets]
-        with concurrent.futures.ProcessPoolExecutor(max_workers=len(targets)) as pool:
-            futures = {pool.submit(_fuzz_worker, kw): kw["target"] for kw in worker_kwargs}
-            for fut in concurrent.futures.as_completed(futures):
-                target_name = futures[fut]
-                try:
-                    fut.result()
-                except Exception as exc:
-                    print(f"[ERROR] Target {target_name} failed: {exc}")
+        worker_kwargs = _expand_worker_kwargs(targets)
+        _run_parallel(worker_kwargs)
     elif "," in args.target:
         targets = [t.strip() for t in args.target.split(",") if t.strip()]
-        print(f"[*] Running {len(targets)} targets in parallel: {targets}")
-        worker_kwargs = [{"target": t, "rng_seed": args.seed, **fuzz_kwargs} for t in targets]
-        with concurrent.futures.ProcessPoolExecutor(max_workers=len(targets)) as pool:
-            futures = {pool.submit(_fuzz_worker, kw): kw["target"] for kw in worker_kwargs}
-            for fut in concurrent.futures.as_completed(futures):
-                target_name = futures[fut]
-                try:
-                    fut.result()
-                except Exception as exc:
-                    print(f"[ERROR] Target {target_name} failed: {exc}")
+        worker_kwargs = _expand_worker_kwargs(targets)
+        _run_parallel(worker_kwargs)
+    elif args.instances > 1:
+        worker_kwargs = _expand_worker_kwargs([args.target])
+        _run_parallel(worker_kwargs)
     else:
         fuzz(target=args.target, **fuzz_kwargs)
 

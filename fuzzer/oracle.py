@@ -45,7 +45,7 @@ def evaluate_target_input(target: str, input_str: str) -> OracleVerdict:
         return _ipv6_oracle(input_str)
     if target_name == "cidrize":
         return _cidrize_oracle(input_str)
-    if target_name in ("json", "json_direct"):
+    if target_name in ("json", "json_direct", "cjson"):
         return _json_oracle(input_str)
     return OracleVerdict(False, None, "no_oracle_for_target", shape="unsupported")
 

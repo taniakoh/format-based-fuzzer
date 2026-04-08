@@ -112,7 +112,7 @@ class FuzzMetrics:
 
 
 class MetricsCollector:
-    def __init__(self, target: str):
+    def __init__(self, target: str, out_dir: "Path | None" = None):
         self.target = target
         self.metrics = FuzzMetrics(target=target)
         self._start = time.time()
@@ -122,7 +122,7 @@ class MetricsCollector:
         self._unique_finding_entries: dict[str, dict[str, object]] = {}
         self._crash_signatures: set[str] = set()
         self._run_metadata: dict[str, object] = {}
-        self._out = RESULTS_DIR / target
+        self._out = out_dir if out_dir is not None else RESULTS_DIR / target
         (self._out / "crashes").mkdir(parents=True, exist_ok=True)
         (self._out / "queue").mkdir(parents=True, exist_ok=True)
         # Clear previous bugs.jsonl for this run
