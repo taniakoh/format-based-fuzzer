@@ -238,17 +238,322 @@ class PassThroughMutator(SemanticMutator):
         return data
 
 
+# ── Generic auto-detecting mutator ───────────────────────────────────────────
+
+class GenericSemanticMutator(SemanticMutator):
+    """Format-agnostic semantic mutator.
+
+    Instead of hand-coded format knowledge, this mutator inspects the input
+    itself to discover its token structure, then applies mutations that target
+    those tokens.  It works on any structured string format without requiring
+    a registered subclass or ``semantic_rules`` in the config.
+
+    Token types detected
+    --------------------
+    - **numeric**  : contiguous digit runs (``\\d+``)
+    - **separator** : single non-alphanumeric, non-space characters
+                      from a common pool (``./:?#@-_=&;,|~+``)
+    - **quoted**   : ``"..."`` or ``'...'`` substrings
+    - **segment**  : text between consecutive separators
+    """
+
+    # Separators common across most structured string formats
+    SEPARATOR_CHARS = set('./:?#@=&;,|~+')
+
+    # Numeric boundary/overflow values to inject
+    BOUNDARY_NUMS = [
+        "0", "1", "-1", "127", "128", "255", "256",
+        "32767", "32768", "65535", "65536",
+        "2147483647", "2147483648", "4294967295",
+    ]
+
+    OPERATIONS = [
+        "separator_replace",
+        "separator_delete",
+        "separator_duplicate",
+        "numeric_boundary",
+        "numeric_overflow",
+        "segment_delete",
+        "segment_duplicate",
+        "segment_truncate",
+        "quote_damage",
+        "case_flip",
+        "whitespace_inject",
+    ]
+
+    # ── Token detection ───────────────────────────────────────────────────────
+
+    _NUM_RE    = re.compile(r'\d+')
+    _QUOTED_RE = re.compile(r'"[^"]*"|\'[^\']*\'')
+
+    def _separator_positions(self, text: str) -> list[int]:
+        return [i for i, ch in enumerate(text) if ch in self.SEPARATOR_CHARS]
+
+    def _segment_spans_generic(self, text: str) -> list[tuple[int, int]]:
+        """Return (start, end) spans of text between separators."""
+        sep_pos = [-1] + self._separator_positions(text) + [len(text)]
+        spans = []
+        for a, b in zip(sep_pos, sep_pos[1:]):
+            start, end = a + 1, b
+            if end > start:
+                spans.append((start, end))
+        return spans
+
+    def get_semantic_spans(self, data: bytes) -> list[SemanticSpan]:
+        text = self._decode(data)
+        spans: list[SemanticSpan] = [SemanticSpan("root", 0, len(text))]
+        for m in self._NUM_RE.finditer(text):
+            spans.append(SemanticSpan("numeric", m.start(), m.end()))
+        for m in self._QUOTED_RE.finditer(text):
+            spans.append(SemanticSpan("quoted", m.start(), m.end()))
+        for i, ch in enumerate(text):
+            if ch in self.SEPARATOR_CHARS:
+                spans.append(SemanticSpan("separator", i, i + 1, kind="separator"))
+        for idx, (start, end) in enumerate(self._segment_spans_generic(text)):
+            spans.append(SemanticSpan(f"segment{idx}", start, end))
+        return spans
+
+    # ── Main entry point ──────────────────────────────────────────────────────
+
+    def mutate(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> bytes:
+        op = random.choice(self.operations)
+        try:
+            result, field = getattr(self, f"_{op}")(
+                data, hot_bytes=hot_bytes, preferred_fields=preferred_fields
+            )
+            self._record_trace(
+                operation=op,
+                field=field,
+                hot_bytes=hot_bytes,
+                preferred_fields=preferred_fields,
+            )
+            return result
+        except Exception:
+            self._last_trace = {"applied": False}
+            return data
+
+    # ── Operations ────────────────────────────────────────────────────────────
+
+    def _separator_replace(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        text = self._decode(data)
+        positions = self._separator_positions(text)
+        if not positions:
+            return data, "separator"
+        spans = [SemanticSpan("separator", i, i + 1, kind="separator") for i in positions]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+        pos = chosen.start if chosen else random.choice(positions)
+        current = text[pos]
+        alternatives = list(self.SEPARATOR_CHARS - {current})
+        replacement = random.choice(alternatives) if alternatives else current
+        return (text[:pos] + replacement + text[pos + 1:]).encode(), "separator"
+
+    def _separator_delete(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        text = self._decode(data)
+        positions = self._separator_positions(text)
+        if not positions:
+            return data, "separator"
+        spans = [SemanticSpan("separator", i, i + 1, kind="separator") for i in positions]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+        pos = chosen.start if chosen else random.choice(positions)
+        return (text[:pos] + text[pos + 1:]).encode(), "separator"
+
+    def _separator_duplicate(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        text = self._decode(data)
+        positions = self._separator_positions(text)
+        if not positions:
+            return data, "separator"
+        spans = [SemanticSpan("separator", i, i + 1, kind="separator") for i in positions]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+        pos = chosen.start if chosen else random.choice(positions)
+        return (text[:pos] + text[pos] + text[pos:]).encode(), "separator"
+
+    def _numeric_boundary(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        text = self._decode(data)
+        matches = list(self._NUM_RE.finditer(text))
+        if not matches:
+            return data, "numeric"
+        spans = [SemanticSpan("numeric", m.start(), m.end()) for m in matches]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+        if chosen is None:
+            chosen = random.choice(spans)
+        replacement = random.choice(self.BOUNDARY_NUMS)
+        return (text[:chosen.start] + replacement + text[chosen.end:]).encode(), "numeric"
+
+    def _numeric_overflow(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        text = self._decode(data)
+        matches = list(self._NUM_RE.finditer(text))
+        if not matches:
+            return data, "numeric"
+        spans = [SemanticSpan("numeric", m.start(), m.end()) for m in matches]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+        if chosen is None:
+            chosen = random.choice(spans)
+        # Multiply the existing number by a large factor or wrap it with overflow value
+        try:
+            val = int(text[chosen.start:chosen.end])
+            overflow = str(val * random.choice([256, 65536, 2**32]))
+        except (ValueError, OverflowError):
+            overflow = "99999999999"
+        return (text[:chosen.start] + overflow + text[chosen.end:]).encode(), "numeric"
+
+    def _segment_delete(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        text = self._decode(data)
+        segs = self._segment_spans_generic(text)
+        if not segs:
+            return data, "segment"
+        spans = [SemanticSpan(f"segment{i}", s, e) for i, (s, e) in enumerate(segs)]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+        if chosen is None:
+            chosen = random.choice(spans)
+        return (text[:chosen.start] + text[chosen.end:]).encode(), "segment"
+
+    def _segment_duplicate(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        text = self._decode(data)
+        segs = self._segment_spans_generic(text)
+        if not segs:
+            return data, "segment"
+        spans = [SemanticSpan(f"segment{i}", s, e) for i, (s, e) in enumerate(segs)]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+        if chosen is None:
+            chosen = random.choice(spans)
+        fragment = text[chosen.start:chosen.end]
+        sep = text[chosen.start - 1] if chosen.start > 0 and text[chosen.start - 1] in self.SEPARATOR_CHARS else "."
+        return (text[:chosen.end] + sep + fragment + text[chosen.end:]).encode(), "segment"
+
+    def _segment_truncate(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        text = self._decode(data)
+        segs = self._segment_spans_generic(text)
+        if not segs:
+            return data, "segment"
+        spans = [SemanticSpan(f"segment{i}", s, e) for i, (s, e) in enumerate(segs)]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+        if chosen is None:
+            chosen = random.choice(spans)
+        length = chosen.end - chosen.start
+        if length <= 1:
+            return data, "segment"
+        cut = random.randint(1, length - 1)
+        return (text[:chosen.start + cut] + text[chosen.end:]).encode(), "segment"
+
+    def _quote_damage(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        text = self._decode(data)
+        matches = list(self._QUOTED_RE.finditer(text))
+        if matches:
+            # Remove quotes from a quoted token
+            spans = [SemanticSpan("quoted", m.start(), m.end()) for m in matches]
+            chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+            if chosen is None:
+                chosen = random.choice(spans)
+            inner = text[chosen.start + 1:chosen.end - 1]
+            return (text[:chosen.start] + inner + text[chosen.end:]).encode(), "quoted"
+        else:
+            # No quotes found — inject one at a guided position
+            pos = self._guided_insert_position(text, hot_bytes, preferred_fields)
+            return (text[:pos] + '"' + text[pos:]).encode(), "quoted"
+
+    def _case_flip(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        text = self._decode(data)
+        segs = self._segment_spans_generic(text)
+        alpha_segs = [(s, e) for s, e in segs if any(c.isalpha() for c in text[s:e])]
+        if not alpha_segs:
+            return data, "segment"
+        spans = [SemanticSpan(f"segment{i}", s, e) for i, (s, e) in enumerate(alpha_segs)]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+        if chosen is None:
+            chosen = random.choice(spans)
+        fragment = text[chosen.start:chosen.end]
+        flipped = fragment.swapcase() if random.random() < 0.5 else fragment.upper()
+        return (text[:chosen.start] + flipped + text[chosen.end:]).encode(), "segment"
+
+    def _whitespace_inject(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        text = self._decode(data)
+        positions = self._separator_positions(text)
+        if not positions:
+            pos = self._guided_insert_position(text, hot_bytes, preferred_fields)
+        else:
+            spans = [SemanticSpan("separator", i, i + 1, kind="separator") for i in positions]
+            chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+            pos = (chosen.start if chosen else random.choice(positions))
+        ws = random.choice([" ", "\t", "\n", "  "])
+        return (text[:pos] + ws + text[pos:]).encode(), "separator"
+
+
 def get_mutator(format_name: str, fmt_config: dict | None = None) -> SemanticMutator:
-    """Return the registered SemanticMutator for *format_name*."""
+    """Return the registered SemanticMutator for *format_name*.
+
+    Falls back to ``GenericSemanticMutator`` (auto-detects token structure
+    from the input) if no format-specific subclass is registered.
+    """
     key = format_name.lower()
     cls = SemanticMutator._registry.get(key)
     if cls is None:
         registered = sorted(SemanticMutator._registry)
         print(
             f"[tier2] No semantic mutator for '{format_name}' "
-            f"(registered: {registered}) - using pass-through."
+            f"(registered: {registered}) — using GenericSemanticMutator."
         )
-        return PassThroughMutator()
+        operations = list(fmt_config["semantic_rules"]) if fmt_config and "semantic_rules" in fmt_config else None
+        return GenericSemanticMutator(operations=operations)
     operations = None
     if fmt_config and "semantic_rules" in fmt_config:
         operations = list(fmt_config["semantic_rules"])
@@ -257,6 +562,7 @@ def get_mutator(format_name: str, fmt_config: dict | None = None) -> SemanticMut
 
 @SemanticMutator.register("json")
 @SemanticMutator.register("json_direct")
+@SemanticMutator.register("cjson")
 class JSONSemanticMutator(SemanticMutator):
     OPERATIONS = [
         "literal_swap",

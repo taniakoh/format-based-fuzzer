@@ -150,14 +150,17 @@ Before using gradients for mutation, verify correctness:
 
 ### 4.1 Benchmark Targets
 
-All experiments run on the four primary targets. Each target is chosen because it represents a distinct format class with different structural complexity:
+All experiments run on the four primary targets plus one external C target. Each target is chosen because it represents a distinct format class with different structural complexity:
 
 | Target | Format class | Structural complexity | Why included |
 |--------|-------------|----------------------|--------------|
 | IPv4 parser | Fixed-length dotted-decimal | Low | Simple baseline; validates basic mutation |
 | IPv6 parser | Variable-length hex-colon | Medium | Multi-representation (compressed, full) |
 | cidrize | Compound (IP + prefix) | Medium | Tests multi-field dependency |
-| JSON decoder | Recursive, nested | High | Deep structural constraints; hardest target |
+| JSON decoder (Python) | Recursive, nested | High | Deep structural constraints; hardest target |
+| **cJSON** (C library) | Recursive, nested | High | External C target; shared greybox benchmark with AFL++ and NEUZZ |
+
+**cJSON** (`github.com/DaveGamble/cJSON`) is a widely-used single-file C JSON parser. It is compiled as a plain binary (no source instrumentation) and fuzzed by all tools under identical QEMU-based edge coverage, ensuring a fair apples-to-apples greybox comparison. This target also demonstrates that the fuzzer generalises beyond the assignment's original Python targets.
 
 Additionally, use the **LAVA-M bug dataset** as a standardised bug-finding benchmark (same as NEUZZ evaluation), specifically the `who`, `base64`, `md5sum`, and `uniq` binaries.
 
@@ -165,34 +168,38 @@ Additionally, use the **LAVA-M bug dataset** as a standardised bug-finding bench
 
 The following tools are chosen as baselines, each representing a distinct point in the design space:
 
-#### AFL (v2.57b)
-**Why:** The de facto evolutionary fuzzing baseline. Represents the pure random-mutation upper bound. All results should be reported relative to AFL coverage as a normalisation baseline (AFL = 100%).
+> **Coverage mechanism decision:** All greybox fuzzers (AFL++, AFLFast, NEUZZ, ours) run against **plain uninstrumented binaries** under **QEMU-based edge coverage** (`afl-fuzz -Q`). This ensures all tools use an identical coverage signal, isolating mutation strategy as the only variable. Source instrumentation (LLVM/`afl-clang-fast`) is deliberately avoided for the primary greybox comparison because it would give AFL++ a coverage quality advantage unrelated to mutation strategy. The cjson target is compiled once as a plain binary (`gcc`, no AFL flags); the same binary is used by every fuzzer.
 
-**Setup:** Standard AFL with LLVM instrumentation (`afl-clang-fast`), default power schedule, no dictionary.
+#### AFL++ (QEMU mode)
+**Why:** The de facto evolutionary fuzzing baseline. Represents coverage-guided mutation without format knowledge or neural guidance. All results reported relative to AFL++ coverage as a normalisation baseline (AFL++ = 100%).
 
-#### AFLFast
+**Setup:** `afl-fuzz -Q -i corpus/cjson_seeds/ -o results/cjson_afl/ -- cjson/cjson_driver --ipstr=@@`
+
+No dictionary, default power schedule, QEMU mode on plain binary.
+
+#### AFLFast (QEMU mode)
 **Why:** Represents the best evolutionary-only approach with smarter seed scheduling (Markov chain power schedule). Tests whether our DL scheduler adds value beyond classical scheduling improvements.
 
-**Setup:** Same instrumentation as AFL; use `--schedule=fast`.
+**Setup:** Same as AFL++ but with `--schedule=fast` and QEMU mode on the same plain binary.
 
-#### NEUZZ
+#### NEUZZ (QEMU mode)
 **Why:** The closest methodological predecessor — gradient-guided mutation with a neural surrogate. The primary comparison point for our neural scheduler contribution. Any gain over NEUZZ isolates the value of format-awareness and the DL energy scheduler specifically.
 
-**Setup:** Original NEUZZ codebase; train surrogate on same initial corpus as our fuzzer; same 4096-neuron MLP. Run with default settings as per the paper.
+**Setup:** Original NEUZZ codebase with QEMU coverage on the same plain binary; train surrogate on same initial corpus as our fuzzer; same 4096-neuron MLP.
 
 **Expected limitation:** NEUZZ uses no format knowledge; byte-level gradient guidance alone may miss multi-byte structural constraints in JSON and CIDR.
 
 #### MLFuzz / PreFuzz (if available)
 **Why:** Represents the most recent NPS-guided fuzzing work. Tests whether our format-aware approach improves over the current state of the art in the NPS family.
 
-**Setup:** Use published configuration; same target binaries.
+**Setup:** Use published configuration with QEMU mode on the same plain binary.
 
 **Note:** If MLFuzz/PreFuzz source is unavailable or requires proprietary infrastructure, document this explicitly and replace with **ANGORA** (gradient-guided without smoothing) as an alternative data point.
 
-#### libFuzzer (coverage-guided, no NN)
-**Why:** Represents the state of the art in production coverage-guided fuzzing without ML. Tests whether the NN adds value over a highly optimised evolutionary baseline.
+#### libFuzzer (supplementary only)
+**Why:** Represents the state of the art in production coverage-guided fuzzing without ML.
 
-**Setup:** Compile targets with `-fsanitize=fuzzer`; use default corpus; enable ASan.
+**Note:** libFuzzer requires source instrumentation (`-fsanitize=fuzzer`) and cannot run in QEMU mode. It is run as a **supplementary comparison** on cJSON only (compiled separately with `-fsanitize=fuzzer,address`), reported alongside but not included in the primary QEMU greybox comparison table. This deviation from the shared coverage mechanism is documented explicitly.
 
 ### 4.3 Metrics
 
@@ -382,18 +389,21 @@ All experiments must be run on the **same machine** to ensure fair comparison. R
 | OS | Linux distribution, kernel version |
 | Python | Version (e.g., 3.10.x) |
 | PyTorch | Version (surrogate training) |
-| AFL version | e.g., 2.57b |
-| Compiler | clang version (for instrumentation) |
-| LLVM | Version |
+| AFL++ version | e.g., 4.x |
+| QEMU version | bundled with AFL++ (`afl-qemu-trace --version`) |
+| Compiler | gcc version (plain binary build) |
 
 Recommended minimum: 8-core CPU, 32 GB RAM, Ubuntu 22.04, dedicated run (no other workloads during experiments).
 
 ### 6.2 Target Compilation
 
-Compile all targets twice:
+Compile targets as follows:
 
-- **With AFL instrumentation** (`afl-clang-fast -fsanitize=address`) for fuzzing
-- **Without instrumentation** (standard `clang`) for surrogate training throughput measurement
+- **Plain binary** (`gcc`, no AFL flags) — used by all greybox fuzzers under QEMU mode. One binary, shared across AFL++, AFLFast, NEUZZ, and our fuzzer. See `cjson/build.sh`.
+- **ASAN binary** (`gcc -fsanitize=address,undefined`) — used for crash triage and silent memory error detection after a bug is found. Not used during the main fuzzing runs (ASAN overhead ~2x would skew throughput metrics).
+- **libFuzzer binary** (`clang -fsanitize=fuzzer,address`) — supplementary only, cJSON target only.
+
+> **Rationale:** Compiling with AFL instrumentation (`afl-clang-fast`) is skipped for the primary comparison. LLVM instrumentation gives AFL++ higher-quality coverage than QEMU, which would favour AFL++ independently of its mutation strategy. Using a single plain binary under QEMU ensures the coverage signal is identical for all fuzzers.
 
 Disable ASLR during runs for reproducibility:
 ```bash

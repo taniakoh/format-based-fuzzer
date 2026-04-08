@@ -50,7 +50,10 @@
       "Bash(pycdc \"C:/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/win-cidrize-runner.exe_extracted/PYZ.pyz_extracted/buggy_cidrize/cidrize_stv.pyc\")",
       "Bash(decompyle3 --version)",
       "Bash(ls \"C:\\\\Users\\\\tanta\\\\Downloads\\\\Code\\\\softwaretesting\\\\format-based-fuzzer\"/*.py)",
-      "Bash(timeout 90 ./ipv4ipv6/win-ipv6-parser.exe --ipstr \"0:1:2:3:4:5:::6\")"
+      "Bash(timeout 90 ./ipv4ipv6/win-ipv6-parser.exe --ipstr \"0:1:2:3:4:5:::6\")",
+      "Bash(sed -n '80,115p' /c/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/main.py)",
+      "Bash(sed -n '238,260p' /c/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/main.py)",
+      "Bash(sed -n '617,700p' /c/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/main.py)"
     ]
   }
 }

@@ -1192,6 +1192,18 @@ def main() -> None:
                     fut.result()
                 except Exception as exc:
                     print(f"[ERROR] Target {target_name} failed: {exc}")
+    elif "," in args.target:
+        targets = [t.strip() for t in args.target.split(",") if t.strip()]
+        print(f"[*] Running {len(targets)} targets in parallel: {targets}")
+        worker_kwargs = [{"target": t, "rng_seed": args.seed, **fuzz_kwargs} for t in targets]
+        with concurrent.futures.ProcessPoolExecutor(max_workers=len(targets)) as pool:
+            futures = {pool.submit(_fuzz_worker, kw): kw["target"] for kw in worker_kwargs}
+            for fut in concurrent.futures.as_completed(futures):
+                target_name = futures[fut]
+                try:
+                    fut.result()
+                except Exception as exc:
+                    print(f"[ERROR] Target {target_name} failed: {exc}")
     else:
         fuzz(target=args.target, **fuzz_kwargs)
 

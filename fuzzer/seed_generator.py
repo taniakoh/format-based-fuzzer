@@ -223,6 +223,7 @@ class IPv6SeedGenerator(SeedGenerator):
 
 @SeedGenerator.register("json")
 @SeedGenerator.register("json_direct")
+@SeedGenerator.register("cjson")
 class JSONSeedGenerator(SeedGenerator):
     """Generates a mix of valid and structured-invalid JSON seeds.
 
