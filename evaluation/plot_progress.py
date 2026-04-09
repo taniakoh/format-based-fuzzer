@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS_DIR = ROOT / "results"
 SERIES = (
-    ("behaviors_seen", "#1d4ed8", "Behaviors seen"),
+    ("coverage_seen", "#1d4ed8", "Coverage seen"),
     ("unique_bugs", "#b91c1c", "Unique bugs"),
     ("corpus_size", "#047857", "Corpus size"),
     ("unique_crashes", "#7c3aed", "Unique crashes"),
@@ -58,7 +58,10 @@ def load_rows(plot_path: Path) -> list[dict[str, float]]:
     with plot_path.open("r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            rows.append({key: float(value) for key, value in row.items()})
+            parsed = {key: float(value) for key, value in row.items()}
+            if "coverage_seen" not in parsed and "behaviors_seen" in parsed:
+                parsed["coverage_seen"] = parsed["behaviors_seen"]
+            rows.append(parsed)
     return rows
 
 
@@ -113,7 +116,7 @@ def load_atheris_rows(results_dir: Path) -> list[dict[str, float]]:
             rows.append({
                 "relative_time_sec": rel_time,
                 "total_execs": float(execs),
-                "behaviors_seen": float(cov),
+                "coverage_seen": float(cov),
                 "corpus_size": float(corp),
                 "unique_bugs": float(unique_bugs),
                 "unique_crashes": float(unique_crashes),

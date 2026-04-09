@@ -1,6 +1,6 @@
 {
   "format": "cjson",
-  "binary_linux": "cjson/cjson_driver",
+  "binary_linux": "cjson/cjson_driver_asan",
   "binary_input_arg": "--ipstr",
   "binary_input_encoding": "raw",
   "fields": ["root", "object", "array", "string", "literal", "comma", "colon"],

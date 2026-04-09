@@ -1,7 +1,7 @@
 """
 Evaluation Harness — metrics collection.
 
-Records coverage, crashes, unique behaviors, and time-to-first-bug.
+Records coverage, crashes, unique findings, and time-to-first-bug.
 Writes results to results/<target>/stats.txt and bugs.jsonl.
 """
 
@@ -52,6 +52,32 @@ def _bitmap_digest(bitmap: bytes | None) -> str:
     return hashlib.sha256(bitmap).hexdigest()[:16]
 
 
+def _traceback_location(traceback_text: str) -> str:
+    """Return the last traceback frame as path:line when available."""
+    if not traceback_text:
+        return ""
+
+    location = ""
+    for line in traceback_text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith('File "'):
+            continue
+
+        parts = stripped.split('"')
+        if len(parts) < 3:
+            continue
+        filename = parts[1]
+        remainder = parts[2]
+        marker = ", line "
+        if marker not in remainder:
+            continue
+        line_part = remainder.split(marker, 1)[1].split(",", 1)[0].strip()
+        if line_part.isdigit():
+            location = f"{filename}:{line_part}"
+
+    return location
+
+
 def _make_bug_signature(result, bitmap: bytes | None = None) -> dict[str, object]:
     signal_name = _signal_name(result.exit_code)
     output_summary = (
@@ -59,6 +85,7 @@ def _make_bug_signature(result, bitmap: bytes | None = None) -> dict[str, object
         or _normalize_fragment(result.stdout)
         or _normalize_fragment(result.traceback)
     )
+    bug_site = _traceback_location(getattr(result, "traceback", ""))
     signature = {
         "bug_type": str(result.bug_type),
         "exit_code": result.exit_code,
@@ -66,6 +93,7 @@ def _make_bug_signature(result, bitmap: bytes | None = None) -> dict[str, object
         "exception": str(result.exception_msg),
         "output_summary": output_summary,
         "bitmap_digest": _bitmap_digest(bitmap),
+        "bug_site": bug_site,
     }
     signature["key"] = json.dumps(signature, sort_keys=True)
     return signature
@@ -144,7 +172,7 @@ class MetricsCollector:
             writer.writerow([
                 "relative_time_sec",
                 "total_execs",
-                "behaviors_seen",
+                "coverage_seen",
                 "interesting_test_cases",
                 "corpus_size",
                 "unique_bugs",
@@ -305,7 +333,7 @@ class MetricsCollector:
         input_str = seed.decode("latin-1", errors="replace")
         content = (
             f"exec={exec_count}\n"
-            f"behavior={queue_id}\n"
+            f"coverage={queue_id}\n"
             f"priority={priority:.6f}\n"
             f"input={input_str}\n"
         )
@@ -476,7 +504,7 @@ class MetricsCollector:
                 "execs_per_sec": round(total_execs / max(1.0, wall_time), 4),
                 "pass_count": self.metrics.pass_count,
                 "pass_rate": round(self.metrics.pass_count / max(1, total_execs), 4),
-                "behaviors_seen": self.metrics.behaviors_covered,
+                "coverage_seen": self.metrics.behaviors_covered,
                 "interesting_test_cases": self.metrics.interesting_test_case_count,
                 "corpus_size": self._last_corpus_size(),
                 "avg_generation_time_ms": round(
@@ -535,7 +563,7 @@ class MetricsCollector:
             f"Avg gen/test    : {avg_generation_ms:.3f} ms",
             f"Avg run/test    : {avg_execution_ms:.3f} ms",
             f"Pass (clean)    : {m.pass_count} ({pass_rate:.1%})",
-            f"Behaviors seen  : {m.behaviors_covered}",
+            f"Coverage seen   : {m.behaviors_covered}",
             f"Interesting tests: {m.interesting_test_case_count}",
             f"Interesting results: {m.interesting_result_count}",
             f"Unique bugs     : {m.unique_bug_count}",

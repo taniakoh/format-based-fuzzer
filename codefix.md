@@ -155,3 +155,32 @@ Reasons:
 Key files changed:
 - `fuzzer/json_atheris_harness.py`
 - `main.py`
+
+## 2026-04-09
+
+### Default cJSON target to ASan build
+Improvements:
+- Switched the `cjson` format config to the `cjson_driver_asan` binary so memory-safety findings are surfaced directly during normal `cjson` fuzzing runs.
+- Updated the README to list `cjson` as a first-class target and document the ASan-backed default.
+
+Reasons:
+- This makes cJSON memory errors visible immediately instead of requiring a separate manual crash triage pass with a different executable.
+
+Key files changed:
+- `config/cjson_format.json`
+- `README.md`
+## 2026-04-09
+
+### Align coverage wording and bug-site deduplication
+Improvements:
+- Changed user-facing metrics and plots to report `coverage` / `coverage_seen` instead of `behavior` / `behaviors_seen`.
+- Updated unique bug signatures to include the recovered traceback bug site so the same bug family can still count separately when different code locations are hit.
+
+Reasons:
+- The previous wording suggested a softer behavior proxy even in places where the metric is used and presented as the run's main coverage signal.
+- The previous deduplication could merge bug hits from different code sites if the broader failure signature matched, which did not reflect the intended slide/report interpretation.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
+- `evaluation/plot_progress.py`
+- `main.py`

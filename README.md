@@ -1,9 +1,10 @@
 # Hybrid Coverage-Guided Fuzzer
 
-A format-aware fuzzer targeting IPv4, IPv6, cidrize, and a bundled JSON decoder.
+A format-aware fuzzer targeting IPv4, IPv6, cidrize, cJSON, and a bundled JSON decoder.
 For binary targets, the executor now supports three runtime modes: Windows
 behavior hashing, Linux behavior hashing, and AFL++ QEMU edge coverage when
-`afl-showmap` is available.
+`afl-showmap` is available. The `cjson` target uses the ASan-enabled Linux
+driver by default.
 
 ## Project Structure
 
@@ -106,7 +107,7 @@ python main.py <target> [options]
 
 | Argument | Values | Description |
 |---|---|---|
-| `target` | `ipv4`, `ipv6`, `cidrize`, `json`, `all` | Which parser to fuzz (`all` runs the binary parser targets sequentially) |
+| `target` | `ipv4`, `ipv6`, `cidrize`, `cjson`, `json`, `all` | Which parser to fuzz (`all` runs the binary parser targets sequentially) |
 | `--havoc-iters N` | int (default: `8`) | Byte-level mutations applied per execution |
 | `--time-budget S` | int (default: `86400`) | Total fuzzing time in seconds |
 | `--seed RNG` | int (default: `42`) | RNG seed for reproducibility |
@@ -129,6 +130,9 @@ python main.py ipv6 --time-budget 3600 --havoc-iters 16
 
 # Fuzz cidrize for 1 hour
 python3 main.py cidrize --time-budget 3600
+
+# Fuzz cJSON with the ASan-enabled driver
+python3 main.py cjson --time-budget 3600
 
 # Fuzz the bundled JSON decoder with Atheris for 10 minutes
 python main.py json --time-budget 600
@@ -167,6 +171,10 @@ python3 main.py ipv4 --time-budget 100 --fresh-start
 > On Windows, the parser bundles are PyInstaller one-file executables. Each
 > execution can take about 20-30 seconds to unpack, so expect much lower exec/s
 > than on Linux.
+
+> The `cjson` target is Linux-only in this repository and defaults to
+> `cjson/cjson_driver_asan`, so AddressSanitizer findings surface as crashes
+> during fuzzing without any extra runtime flag.
 
 > The `json` target is different: it launches an Atheris/libFuzzer campaign in `results/json/` and lets Atheris manage corpus growth and coverage guidance directly.
 

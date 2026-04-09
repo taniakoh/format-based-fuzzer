@@ -1,0 +1,11 @@
+{}
+[]
+null
+true
+false
+0
+"text"
+{"json":"obj"}
+{"a":[1,2,3],"b":{"nested":true}}
+["foo", {"bar":["baz", null, 1.0, 2]}]
+{"__complex__": true, "real": 1, "imag": 2}

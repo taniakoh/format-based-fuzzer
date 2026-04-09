@@ -15,7 +15,7 @@ venv/
 fuzzer-venv/
 
 # Fuzzer runtime output
-corpus/
+# corpus/
 logs/
 models/
 results/

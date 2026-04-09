@@ -371,7 +371,7 @@ def _run_atheris_target(
         f"Eval mode used  : {evaluation_mode_resolved}",
         f"Wall time       : {duration:.1f}s",
         "Total execs     : Atheris-managed (see atheris.log)",
-        "Behaviors seen  : Atheris-managed (see atheris.log)",
+        "Coverage seen   : Atheris-managed (see atheris.log)",
         "Unique bugs     : Atheris-managed (see atheris.log)",
         "Validity bugs   : N/A",
         "Bonus bugs      : N/A",
@@ -544,7 +544,7 @@ def _postprocess_atheris_results(
                 "wall_time_secs": round(duration, 1),
                 "total_executions": "Atheris-managed",
                 "execs_per_sec": "Atheris-managed",
-                "behaviors_seen": "Atheris-managed",
+                "coverage_seen": "Atheris-managed",
                 "corpus_size": "Atheris-managed",
             },
             "totals": {
@@ -580,7 +580,7 @@ def _postprocess_atheris_results(
         with open(plot_path, "w", encoding="utf-8", newline="") as f:
             writer = _csv.writer(f)
             writer.writerow([
-                "relative_time_sec", "total_execs", "behaviors_seen",
+                "relative_time_sec", "total_execs", "coverage_seen",
                 "interesting_test_cases", "corpus_size", "unique_bugs", "unique_crashes",
             ])
             writer.writerow([round(duration, 3), 0, 0, 0, 0, len(unique_bugs), total_crashes])
@@ -1088,7 +1088,7 @@ def fuzz(
         metrics.write_mutation_stats(scheduler.export_mutation_stats())
     print(
         f"\n[*] Done. Executions: {exec_count} | "
-        f"Behaviors: {final.behaviors_covered} | "
+        f"Coverage: {final.behaviors_covered} | "
         f"Corpus size: {len(corpus)}"
     )
 
