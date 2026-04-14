@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import json
+import re
 import signal
 import time
 from collections import Counter
@@ -18,6 +19,7 @@ from pathlib import Path
 
 _HERE = Path(__file__).parent.parent
 RESULTS_DIR = _HERE / "results"
+_TRACEBACK_FRAME_RE = re.compile(r'^\s*File\s+"([^"]+)",\s+line\s+(\d+)')
 
 
 def _first_nonempty_line(text: str) -> str:
@@ -52,30 +54,132 @@ def _bitmap_digest(bitmap: bytes | None) -> str:
     return hashlib.sha256(bitmap).hexdigest()[:16]
 
 
+def _parse_traceback_frames(traceback_text: str) -> list[tuple[str, int]]:
+    frames: list[tuple[str, int]] = []
+    if not traceback_text:
+        return frames
+
+    for line in traceback_text.splitlines():
+        match = _TRACEBACK_FRAME_RE.match(line)
+        if not match:
+            continue
+        frames.append((match.group(1), int(match.group(2))))
+    return frames
+
+
+def _exception_class_from_text(text: str) -> str:
+    cleaned = _first_nonempty_line(text).strip()
+    if not cleaned:
+        return ""
+    class_part = cleaned.split(":", 1)[0].strip()
+    return class_part.rsplit(".", 1)[-1]
+
+
+def _traceback_exception_class(traceback_text: str) -> str:
+    for line in reversed(traceback_text.splitlines()):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("File ") or stripped.startswith("Traceback"):
+            continue
+        return _exception_class_from_text(stripped)
+    return ""
+
+
 def _traceback_location(traceback_text: str) -> str:
     """Return the last traceback frame as path:line when available."""
-    if not traceback_text:
+    frames = _parse_traceback_frames(traceback_text)
+    if not frames:
         return ""
+    filename, lineno = frames[-1]
+    return f"{filename}:{lineno}"
 
-    location = ""
-    for line in traceback_text.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith('File "'):
-            continue
 
-        parts = stripped.split('"')
-        if len(parts) < 3:
-            continue
-        filename = parts[1]
-        remainder = parts[2]
-        marker = ", line "
-        if marker not in remainder:
-            continue
-        line_part = remainder.split(marker, 1)[1].split(",", 1)[0].strip()
-        if line_part.isdigit():
-            location = f"{filename}:{line_part}"
+def derive_bug_site(
+    *,
+    bug_type: str,
+    exception: str = "",
+    traceback_text: str = "",
+    parser_bug_site: dict[str, object] | None = None,
+    fallback_exc_type: str = "",
+    fallback_filename: str = "",
+    fallback_lineno: int | None = None,
+) -> dict[str, object]:
+    parser_bug_site = parser_bug_site or {}
 
-    return location
+    frames = _parse_traceback_frames(traceback_text)
+    traceback_exc_type = _traceback_exception_class(traceback_text)
+    if frames:
+        filename, lineno = frames[-1]
+        exception_class = traceback_exc_type or str(fallback_exc_type or "").strip() or _exception_class_from_text(exception)
+        payload = {
+            "bug_type": str(bug_type),
+            "dedup_source": "traceback",
+            "exception_class": exception_class,
+            "filename": filename,
+            "lineno": lineno,
+        }
+        return {
+            "dedup_source": "traceback",
+            "exception_class": exception_class,
+            "filename": filename,
+            "lineno": lineno,
+            "fault_location": f"{filename}:{lineno}",
+            "key": json.dumps(payload, sort_keys=True),
+        }
+
+    parser_filename = str(parser_bug_site.get("filename", "") or "")
+    parser_lineno = parser_bug_site.get("lineno")
+    if parser_filename and parser_lineno is not None:
+        parser_exc_type = str(parser_bug_site.get("exc_type", "") or "")
+        exception_class = parser_exc_type or str(fallback_exc_type or "").strip() or _exception_class_from_text(exception)
+        payload = {
+            "bug_type": str(bug_type),
+            "dedup_source": "parser_reported",
+            "exception_class": exception_class,
+            "filename": parser_filename,
+            "lineno": int(parser_lineno),
+        }
+        return {
+            "dedup_source": "parser_reported",
+            "exception_class": exception_class,
+            "filename": parser_filename,
+            "lineno": int(parser_lineno),
+            "fault_location": f"{parser_filename}:{int(parser_lineno)}",
+            "key": json.dumps(payload, sort_keys=True),
+        }
+
+    if fallback_filename and fallback_lineno is not None:
+        exception_class = str(fallback_exc_type or "").strip() or _exception_class_from_text(exception)
+        payload = {
+            "bug_type": str(bug_type),
+            "dedup_source": "csv_fields",
+            "exception_class": exception_class,
+            "filename": fallback_filename,
+            "lineno": int(fallback_lineno),
+        }
+        return {
+            "dedup_source": "csv_fields",
+            "exception_class": exception_class,
+            "filename": fallback_filename,
+            "lineno": int(fallback_lineno),
+            "fault_location": f"{fallback_filename}:{int(fallback_lineno)}",
+            "key": json.dumps(payload, sort_keys=True),
+        }
+
+    exception_class = str(fallback_exc_type or "").strip() or traceback_exc_type or _exception_class_from_text(exception)
+    payload = {
+        "bug_type": str(bug_type),
+        "dedup_source": "fallback_exception",
+        "exception_class": exception_class,
+        "exception": str(exception),
+    }
+    return {
+        "dedup_source": "fallback_exception",
+        "exception_class": exception_class,
+        "filename": "",
+        "lineno": None,
+        "fault_location": "",
+        "key": json.dumps(payload, sort_keys=True),
+    }
 
 
 def _make_bug_signature(result, bitmap: bytes | None = None) -> dict[str, object]:
@@ -99,6 +203,24 @@ def _make_bug_signature(result, bitmap: bytes | None = None) -> dict[str, object
     return signature
 
 
+def _parser_bug_signature(result) -> str | None:
+    """Return a parser-site signature when the target reported an explicit bug."""
+    parser_type = str(getattr(result, "parser_reported_bug_type", "") or "")
+    filename = str(getattr(result, "parser_reported_filename", "") or "")
+    lineno = getattr(result, "parser_reported_lineno", None)
+    if not parser_type or not filename or lineno is None:
+        return None
+
+    payload = {
+        "parser_reported_bug_type": parser_type,
+        "parser_reported_exc_type": str(getattr(result, "parser_reported_exc_type", "") or ""),
+        "parser_reported_message": str(getattr(result, "parser_reported_message", "") or ""),
+        "parser_reported_filename": filename,
+        "parser_reported_lineno": int(lineno),
+    }
+    return json.dumps(payload, sort_keys=True)
+
+
 def _taxonomy_payload(result) -> dict[str, object]:
     from fuzzer.executor import result_taxonomy_tags
 
@@ -115,11 +237,13 @@ class FuzzMetrics:
     behaviors_covered: int = 0
     pass_count: int = 0
     unique_bug_count: int = 0
+    parser_site_unique_bug_count: int = 0
     traceback_unique_bugs: int = 0
     interesting_result_count: int = 0
     interesting_test_case_count: int = 0
     unique_crashes: int = 0
     validity_bugs: int = 0
+    functional_bugs: int = 0
     bonus_bugs: int = 0
     oracle_mismatches: int = 0
     invalidity_count: int = 0
@@ -145,6 +269,7 @@ class MetricsCollector:
         self.metrics = FuzzMetrics(target=target)
         self._start = time.time()
         self._bug_signatures: set[str] = set()
+        self._parser_bug_signatures: set[str] = set()
         self._traceback_signatures: set[str] = set()
         self._unique_bug_entries: dict[str, dict[str, object]] = {}
         self._unique_finding_entries: dict[str, dict[str, object]] = {}
@@ -152,6 +277,7 @@ class MetricsCollector:
         self._run_metadata: dict[str, object] = {}
         self._out = out_dir if out_dir is not None else RESULTS_DIR / target
         (self._out / "crashes").mkdir(parents=True, exist_ok=True)
+        (self._out / "logs").mkdir(parents=True, exist_ok=True)
         (self._out / "queue").mkdir(parents=True, exist_ok=True)
         # Clear previous bugs.jsonl for this run
         bugs_file = self._out / "bugs.jsonl"
@@ -159,9 +285,11 @@ class MetricsCollector:
         self._unique_bugs_path = self._out / "unique_bugs.json"
         self._unique_findings_path = self._out / "unique_findings.json"
         self._bug_coverage_summary_path = self._out / "bug_coverage_summary.json"
+        self._bug_counts_path = self._out / "logs" / "bug_counts.csv"
         self._write_unique_bugs()
         self._write_unique_findings()
         self._write_bug_coverage_summary()
+        self._write_bug_counts_csv()
         self._plot_path = self._out / "plot_data"
         self._dl_training_path = self._out / "dl_training.jsonl"
         self._dl_summary_path = self._out / "dl_summary.json"
@@ -177,6 +305,9 @@ class MetricsCollector:
                 "corpus_size",
                 "unique_bugs",
                 "unique_crashes",
+                "validity_bugs",
+                "functional_bugs",
+                "bonus_bugs",
             ])
         with open(self._energy_log_path, "w", encoding="utf-8", newline="") as f:
             csv.writer(f).writerow(["relative_time_sec", "seed_id", "energy"])
@@ -236,21 +367,39 @@ class MetricsCollector:
 
         signature = _make_bug_signature(result, bitmap)
         signature_key = str(signature["key"])
+        parser_signature_key = _parser_bug_signature(result)
+        bug_site = derive_bug_site(
+            bug_type=str(result.bug_type),
+            exception=str(result.exception_msg),
+            traceback_text=getattr(result, "traceback", ""),
+            parser_bug_site={
+                "bug_type": getattr(result, "parser_reported_bug_type", None),
+                "exc_type": getattr(result, "parser_reported_exc_type", ""),
+                "filename": getattr(result, "parser_reported_filename", ""),
+                "lineno": getattr(result, "parser_reported_lineno", None),
+            },
+        )
+        bug_site_key = str(bug_site["key"])
         if result.is_real_bug:
-            self._bug_signatures.add(signature_key)
+            self._bug_signatures.add(bug_site_key)
             self.metrics.unique_bug_count = len(self._bug_signatures)
-            tb = getattr(result, "traceback", "")
-            if tb:
-                tb_key = hashlib.sha256(
-                    f"{result.bug_type}|{tb.strip()}".encode("utf-8", errors="replace")
-                ).hexdigest()[:32]
-                self._traceback_signatures.add(tb_key)
+            if parser_signature_key is not None:
+                self._parser_bug_signatures.add(parser_signature_key)
+                self.metrics.parser_site_unique_bug_count = len(self._parser_bug_signatures)
+            if str(bug_site.get("dedup_source", "")) == "traceback":
+                self._traceback_signatures.add(bug_site_key)
                 self.metrics.traceback_unique_bugs = len(self._traceback_signatures)
-        if result.is_real_bug and signature_key not in self._unique_bug_entries:
-            self._unique_bug_entries[signature_key] = {
-                **self._finding_entry(result, signature, input_str),
+        if result.is_real_bug and bug_site_key not in self._unique_bug_entries:
+            self._unique_bug_entries[bug_site_key] = {
+                **self._finding_entry(result, signature, input_str, bug_site),
                 "bug_type": result.bug_type,
+                "total_occurrences": 1,
             }
+            self._write_unique_bugs()
+        elif result.is_real_bug:
+            self._unique_bug_entries[bug_site_key]["total_occurrences"] = (
+                int(self._unique_bug_entries[bug_site_key].get("total_occurrences", 1)) + 1
+            )
             self._write_unique_bugs()
 
         if signature_key not in self._unique_finding_entries:
@@ -258,6 +407,7 @@ class MetricsCollector:
                 result,
                 signature,
                 input_str,
+                bug_site,
             )
             self._write_unique_findings()
 
@@ -275,6 +425,13 @@ class MetricsCollector:
             "bug_type": result.bug_type,
             "classification": _taxonomy_payload(result),
             "signature": {k: v for k, v in signature.items() if k != "key"},
+            "bug_site": {k: v for k, v in bug_site.items() if k != "key"},
+            "parser_bug_site": {
+                "bug_type": getattr(result, "parser_reported_bug_type", None),
+                "exc_type": getattr(result, "parser_reported_exc_type", ""),
+                "filename": getattr(result, "parser_reported_filename", ""),
+                "lineno": getattr(result, "parser_reported_lineno", None),
+            },
             "exit_code": result.exit_code,
             "exception": result.exception_msg,
             "stdout": result.stdout,
@@ -295,14 +452,10 @@ class MetricsCollector:
             self.metrics.validity_bugs += 1
         elif result.bug_type == BugType.BONUS:
             self.metrics.bonus_bugs += 1
-        elif result.bug_type == BugType.ORACLE_MISMATCH:
-            self.metrics.oracle_mismatches += 1
+        elif result.bug_type == BugType.FUNCTIONAL:
+            self.metrics.functional_bugs += 1
         elif result.bug_type == BugType.INVALIDITY:
             self.metrics.invalidity_count += 1
-        elif result.bug_type == BugType.ORACLE_UNKNOWN_ACCEPT:
-            self.metrics.oracle_unknown_accepts += 1
-        elif result.bug_type == BugType.ORACLE_UNKNOWN_REJECT:
-            self.metrics.oracle_unknown_rejects += 1
         elif result.bug_type == BugType.PERFORMANCE:
             self.metrics.performance_bugs += 1
         elif result.is_crash:
@@ -356,6 +509,9 @@ class MetricsCollector:
                 corpus_size,
                 self.metrics.unique_bug_count,
                 self.metrics.unique_crashes,
+                self.metrics.validity_bugs,
+                self.metrics.functional_bugs,
+                self.metrics.bonus_bugs,
             ])
 
     def record_energy(self, seed: bytes, energy: float) -> None:
@@ -394,6 +550,7 @@ class MetricsCollector:
         self._write_unique_bugs()
         self._write_unique_findings()
         self._write_bug_coverage_summary()
+        self._write_bug_counts_csv()
         self._write_stats()
         return self.metrics
 
@@ -402,11 +559,19 @@ class MetricsCollector:
         result,
         signature: dict[str, object],
         input_str: str,
+        bug_site: dict[str, object],
     ) -> dict[str, object]:
         return {
             "bug_type": result.bug_type,
             "classification": _taxonomy_payload(result),
             "signature": {k: v for k, v in signature.items() if k != "key"},
+            "bug_site": {k: v for k, v in bug_site.items() if k != "key"},
+            "parser_bug_site": {
+                "bug_type": getattr(result, "parser_reported_bug_type", None),
+                "exc_type": getattr(result, "parser_reported_exc_type", ""),
+                "filename": getattr(result, "parser_reported_filename", ""),
+                "lineno": getattr(result, "parser_reported_lineno", None),
+            },
             "exception": result.exception_msg,
             "first_seen_exec": self.metrics.total_executions,
             "example_input": input_str,
@@ -428,7 +593,10 @@ class MetricsCollector:
         entries.sort(key=lambda item: int(item["first_seen_exec"]))
         payload = {
             "target": self.target,
-            "unique_bug_count": len(entries),
+            "count_definition": "Real bugs deduplicated by canonical bug site: traceback exception class plus source filename and line when available, otherwise parser-reported site, otherwise normalized fallback fields, and finally exception text.",
+            "unique_bug_count": self.metrics.unique_bug_count,
+            "parser_site_unique_bug_count": self.metrics.parser_site_unique_bug_count,
+            "traceback_unique_bug_count": self.metrics.traceback_unique_bugs,
             "entries": entries,
         }
         self._unique_bugs_path.write_text(
@@ -466,10 +634,13 @@ class MetricsCollector:
         finding_entries = list(self._unique_finding_entries.values())
         total_by_bug_type = Counter()
         unique_by_bug_type = Counter()
+        unique_real_by_bug_type = Counter()
         total_by_tag = Counter()
         unique_by_tag = Counter()
+        unique_real_by_tag = Counter()
         parser_reported_totals = Counter()
         parser_reported_unique = Counter()
+        parser_reported_unique_real = Counter()
 
         bugs_path = self._out / "bugs.jsonl"
         if bugs_path.exists():
@@ -493,6 +664,16 @@ class MetricsCollector:
             parser_reported_unique[str(parser_type)] += 1
             for tag in classification.get("taxonomy_tags", []):
                 unique_by_tag[str(tag)] += 1
+
+        for entry in self._unique_bug_entries.values():
+            bug_type = str(entry.get("bug_type", "unknown"))
+            unique_real_by_bug_type[bug_type] += 1
+            parser_site = entry.get("parser_bug_site", {})
+            parser_type = parser_site.get("bug_type") or "none"
+            parser_reported_unique_real[str(parser_type)] += 1
+            classification = entry.get("classification", {})
+            for tag in classification.get("taxonomy_tags", []):
+                unique_real_by_tag[str(tag)] += 1
 
         wall_time = self.metrics.wall_time_secs
         total_execs = self.metrics.total_executions
@@ -520,26 +701,87 @@ class MetricsCollector:
                 "interesting_results": self.metrics.interesting_result_count,
                 "unique_findings": len(finding_entries),
                 "unique_real_bugs": self.metrics.unique_bug_count,
+                "parser_site_unique_real_bugs": self.metrics.parser_site_unique_bug_count,
                 "traceback_unique_bugs": self.metrics.traceback_unique_bugs,
                 "unique_crashes": self.metrics.unique_crashes,
             },
             "by_bug_type": {
                 "total": dict(sorted(total_by_bug_type.items())),
                 "unique": dict(sorted(unique_by_bug_type.items())),
+                "unique_real": dict(sorted(unique_real_by_bug_type.items())),
             },
             "by_parser_reported_type": {
                 "total": dict(sorted(parser_reported_totals.items())),
                 "unique": dict(sorted(parser_reported_unique.items())),
+                "unique_real": dict(sorted(parser_reported_unique_real.items())),
             },
             "by_taxonomy_tag": {
                 "total": dict(sorted(total_by_tag.items())),
                 "unique": dict(sorted(unique_by_tag.items())),
+                "unique_real": dict(sorted(unique_real_by_tag.items())),
             },
         }
         self._bug_coverage_summary_path.write_text(
             json.dumps(payload, indent=2, sort_keys=False) + "\n",
             encoding="utf-8",
         )
+
+    def _write_bug_counts_csv(self) -> None:
+        rows: dict[str, dict[str, object]] = {}
+        bugs_path = self._out / "bugs.jsonl"
+        if bugs_path.exists():
+            for line in bugs_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                entry = json.loads(line)
+                bug_type = str(entry.get("bug_type", "unknown"))
+                exception = str(entry.get("exception", "") or "")
+                parser_bug_site = entry.get("parser_bug_site", {}) or {}
+                site = derive_bug_site(
+                    bug_type=bug_type,
+                    exception=exception,
+                    traceback_text=str(entry.get("traceback", "") or ""),
+                    parser_bug_site={
+                        "bug_type": parser_bug_site.get("bug_type"),
+                        "exc_type": parser_bug_site.get("exc_type", ""),
+                        "filename": parser_bug_site.get("filename", ""),
+                        "lineno": parser_bug_site.get("lineno", None),
+                    },
+                )
+                row_key = str(site["key"])
+                if row_key not in rows:
+                    rows[row_key] = {
+                        "bug_type": bug_type,
+                        "exc_type": str(site.get("exception_class", "") or ""),
+                        "exc_message": exception,
+                        "filename": str(site.get("filename", "") or ""),
+                        "lineno": "" if site.get("lineno", None) is None else int(site["lineno"]),
+                        "count": 0,
+                    }
+                rows[row_key]["count"] = int(rows[row_key]["count"]) + 1
+
+        ordered_rows = sorted(
+            rows.values(),
+            key=lambda row: (
+                str(row["bug_type"]),
+                str(row["filename"]),
+                "" if row["lineno"] == "" else f"{int(row['lineno']):09d}",
+                str(row["exc_type"]),
+                str(row["exc_message"]),
+            ),
+        )
+        with open(self._bug_counts_path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["bug_type", "exc_type", "exc_message", "filename", "lineno", "count"])
+            for row in ordered_rows:
+                writer.writerow([
+                    row["bug_type"],
+                    row["exc_type"],
+                    row["exc_message"],
+                    row["filename"],
+                    row["lineno"],
+                    row["count"],
+                ])
 
     def _write_dl_summary(self, payload: dict) -> None:
         self._dl_summary_path.write_text(
@@ -567,13 +809,12 @@ class MetricsCollector:
             f"Interesting tests: {m.interesting_test_case_count}",
             f"Interesting results: {m.interesting_result_count}",
             f"Unique bugs     : {m.unique_bug_count}",
+            f"Parser-site uniq: {m.parser_site_unique_bug_count}",
             f"Traceback-unique: {m.traceback_unique_bugs}",
             f"Validity bugs   : {m.validity_bugs}",
+            f"Functional bugs : {m.functional_bugs}",
             f"Bonus bugs      : {m.bonus_bugs}",
-            f"Oracle mismatch : {m.oracle_mismatches}",
             f"Invalidity count: {m.invalidity_count}",
-            f"Oracle unknown accept: {m.oracle_unknown_accepts}",
-            f"Oracle unknown reject: {m.oracle_unknown_rejects}",
             f"Performance bugs: {m.performance_bugs}",
             f"Unique crashes  : {m.unique_crashes}",
             (

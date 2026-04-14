@@ -37,9 +37,12 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
+from collections import Counter
 from pathlib import Path
 
-from evaluation.collect_metrics import MetricsCollector
+from evaluation.collect_metrics import MetricsCollector, derive_bug_site
+from fuzzer.bootstrap import ensure_bootstrap_profile
 from fuzzer.corpus import Corpus
 from fuzzer.coverage import CoverageAnalyzer
 from fuzzer.executor import Executor, register_binary
@@ -51,8 +54,8 @@ from fuzzer.scheduler import FixedScheduler, StaticScheduler
 from fuzzer.seed_generator import get_seed_generator
 
 # Train the surrogate every N new behaviors discovered.
-# Low because each binary call is ~30 s, so corpus growth is slow.
-TRAIN_EVERY = 2
+# Needs at least this many samples before the gradient signal is meaningful.
+TRAIN_EVERY = 10
 _HERE = Path(__file__).parent
 EVALUATION_MODES = ("auto", "havoc_only", "semantic_plus_havoc", "static_payoff", "hybrid_dl")
 
@@ -75,12 +78,10 @@ def _resolve_evaluation_mode(
     if requested_mode == "hybrid_dl":
         return "hybrid_dl"
 
-    try:
-        import torch  # noqa: F401
-
+    import importlib.util
+    if importlib.util.find_spec("torch") is not None:
         return "hybrid_dl"
-    except ImportError:
-        return "static_payoff"
+    return "static_payoff"
 
 
 def _run_dir(target: str, run_id: str) -> Path:
@@ -396,13 +397,28 @@ def _run_atheris_target(
     print("\n".join(stats_lines))
 
 
-def _classify_atheris_crash(crash_file: Path) -> tuple[str, str]:
-    """Re-run one Atheris crash input through the oracle and return (bug_type, exc_msg)."""
+def _atheris_bug_record(
+    bug_type: str,
+    exception: str,
+    *,
+    traceback_text: str = "",
+    exc_type: str = "",
+) -> dict[str, object]:
+    return {
+        "bug_type": bug_type,
+        "exception": exception,
+        "traceback": traceback_text,
+        "exc_type": exc_type,
+    }
+
+
+def _classify_atheris_crash(crash_file: Path) -> dict[str, object]:
+    """Re-run one Atheris crash input and return bug metadata for deduplication."""
     name = crash_file.name
     if name.startswith("timeout-") or name.startswith("slow-"):
-        return "TIMEOUT", "Buggy JSON decoder timed out"
+        return _atheris_bug_record("TIMEOUT", "Buggy JSON decoder timed out", exc_type="PerformanceBug")
     if name.startswith("oom-"):
-        return "CRASH", "Out of memory"
+        return _atheris_bug_record("CRASH", "Out of memory", exc_type="MemoryError")
 
     try:
         import json as _json
@@ -426,25 +442,65 @@ def _classify_atheris_crash(crash_file: Path) -> tuple[str, str]:
             candidate_value = buggy_loads(data)
             candidate_ok = True
             candidate_exc = None
+            candidate_tb = ""
         except PerformanceBug as exc:
-            return "TIMEOUT", f"PerformanceBug: {exc}"
+            return _atheris_bug_record(
+                "TIMEOUT",
+                f"PerformanceBug: {exc}",
+                traceback_text="".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+                exc_type=type(exc).__name__,
+            )
         except (JSONDecodeError, InvalidityBug, UnicodeDecodeError, ValueError) as exc:
             candidate_ok = False
             candidate_exc = exc
+            candidate_tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        except Exception as exc:
+            return _atheris_bug_record(
+                "CRASH",
+                f"Re-classification failed: {exc}",
+                traceback_text="".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+                exc_type=type(exc).__name__,
+            )
 
         if ref_ok and not candidate_ok:
             if isinstance(candidate_exc, InvalidityBug):
-                return "wrong_exception_type", (
-                    f"buggy_json raised InvalidityBug but should raise JSONDecodeError: {candidate_exc}"
+                return _atheris_bug_record(
+                    "wrong_exception_type",
+                    f"buggy_json raised InvalidityBug but should raise JSONDecodeError: {candidate_exc}",
+                    traceback_text=candidate_tb,
+                    exc_type=type(candidate_exc).__name__,
                 )
-            return "validity", f"stdlib accepted, buggy_json rejected: {candidate_exc}"
+            return _atheris_bug_record(
+                "validity",
+                f"stdlib accepted, buggy_json rejected: {candidate_exc}",
+                traceback_text=candidate_tb,
+                exc_type=type(candidate_exc).__name__,
+            )
         if not ref_ok and candidate_ok:
-            return "oracle_mismatch", f"stdlib rejected, buggy_json accepted: {ref_exc}"
+            exc_type = type(ref_exc).__name__ if ref_exc is not None else ""
+            return _atheris_bug_record(
+                "oracle_mismatch",
+                f"stdlib rejected, buggy_json accepted: {ref_exc}",
+                exc_type=exc_type,
+            )
         if ref_ok and candidate_ok:
-            return "oracle_mismatch", "Decoded values differ between buggy_json and stdlib"
-        return "invalidity", "Both stdlib and buggy_json rejected the input"
+            return _atheris_bug_record(
+                "oracle_mismatch",
+                "Decoded values differ between buggy_json and stdlib",
+            )
+        return _atheris_bug_record(
+            "invalidity",
+            "Both stdlib and buggy_json rejected the input",
+            traceback_text=candidate_tb,
+            exc_type=type(candidate_exc).__name__ if candidate_exc is not None else "",
+        )
     except Exception as exc:
-        return "CRASH", f"Re-classification failed: {exc}"
+        return _atheris_bug_record(
+            "CRASH",
+            f"Re-classification failed: {exc}",
+            traceback_text="".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+            exc_type=type(exc).__name__,
+        )
 
 
 def _postprocess_atheris_results(
@@ -455,7 +511,6 @@ def _postprocess_atheris_results(
 ) -> None:
     """Generate structured result files from Atheris crash artifacts to match ipv4/ipv6 output."""
     import csv as _csv
-    import hashlib as _hashlib
 
     logs_dir = results_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -464,7 +519,10 @@ def _postprocess_atheris_results(
 
     unique_bugs: dict[str, dict] = {}
     unique_findings: dict[str, dict] = {}
-    bug_type_counts: dict[str, int] = {}
+    bug_type_counts: Counter[str] = Counter()
+    parser_site_bug_signatures: set[str] = set()
+    traceback_bug_signatures: set[str] = set()
+    bug_count_rows: dict[str, dict[str, object]] = {}
 
     for crash_file in crash_files:
         try:
@@ -473,9 +531,19 @@ def _postprocess_atheris_results(
         except Exception:
             continue
 
-        bug_type, exc_msg = _classify_atheris_crash(crash_file)
-        sig_key = _hashlib.sha256(f"{bug_type}|{exc_msg}".encode()).hexdigest()[:32]
-        bug_type_counts[bug_type] = bug_type_counts.get(bug_type, 0) + 1
+        bug_record = _classify_atheris_crash(crash_file)
+        bug_type = str(bug_record["bug_type"])
+        exc_msg = str(bug_record["exception"])
+        tb_text = str(bug_record.get("traceback", "") or "")
+        exc_type = str(bug_record.get("exc_type", "") or "")
+        bug_type_counts[bug_type] += 1
+        bug_site = derive_bug_site(
+            bug_type=bug_type,
+            exception=exc_msg,
+            traceback_text=tb_text,
+            fallback_exc_type=exc_type,
+        )
+        site_key = str(bug_site["key"])
 
         entry = {
             "bug_type": bug_type,
@@ -486,7 +554,7 @@ def _postprocess_atheris_results(
             "exit_code": None,
             "stdout": "",
             "stderr": "",
-            "traceback": "",
+            "traceback": tb_text,
             "oracle": {
                 "supported": False,
                 "expected_valid": None,
@@ -499,15 +567,34 @@ def _postprocess_atheris_results(
                 "parser_reported_message": "",
                 "taxonomy_tags": [bug_type],
             },
+            "bug_site": {k: v for k, v in bug_site.items() if k != "key"},
             "signature": {
                 "bug_type": bug_type,
                 "exception": exc_msg,
                 "bitmap_digest": "",
             },
+            "total_occurrences": 1,
         }
-        unique_findings[sig_key] = entry
+        unique_findings[site_key] = entry
         if bug_type not in ("invalidity",):
-            unique_bugs[sig_key] = entry
+            if site_key not in unique_bugs:
+                unique_bugs[site_key] = entry
+            else:
+                unique_bugs[site_key]["total_occurrences"] = int(unique_bugs[site_key].get("total_occurrences", 1)) + 1
+            if bug_site.get("dedup_source") == "traceback":
+                traceback_bug_signatures.add(site_key)
+
+        row_key = site_key
+        if row_key not in bug_count_rows:
+            bug_count_rows[row_key] = {
+                "bug_type": bug_type,
+                "exc_type": str(bug_site.get("exception_class", "") or exc_type),
+                "exc_message": exc_msg,
+                "filename": str(bug_site.get("filename", "") or ""),
+                "lineno": "" if bug_site.get("lineno", None) is None else int(bug_site["lineno"]),
+                "count": 0,
+            }
+        bug_count_rows[row_key]["count"] = int(bug_count_rows[row_key]["count"]) + 1
 
     # bugs.jsonl
     bugs_jsonl = results_dir / "bugs.jsonl"
@@ -519,7 +606,10 @@ def _postprocess_atheris_results(
     (results_dir / "unique_bugs.json").write_text(
         json.dumps({
             "target": target,
+            "count_definition": "Real bugs deduplicated by canonical bug site: traceback exception class plus source filename and line when available, otherwise parser-reported site, otherwise normalized fallback fields, and finally exception text.",
             "unique_bug_count": len(unique_bugs),
+            "parser_site_unique_bug_count": len(parser_site_bug_signatures),
+            "traceback_unique_bug_count": len(traceback_bug_signatures),
             "entries": list(unique_bugs.values()),
         }, indent=2) + "\n",
         encoding="utf-8",
@@ -550,11 +640,14 @@ def _postprocess_atheris_results(
             "totals": {
                 "unique_findings": len(unique_findings),
                 "unique_real_bugs": len(unique_bugs),
+                "parser_site_unique_real_bugs": len(parser_site_bug_signatures),
+                "traceback_unique_bugs": len(traceback_bug_signatures),
                 "unique_crashes": total_crashes,
             },
             "by_bug_type": {
-                "total": bug_type_counts,
-                "unique": {k: 1 for k in bug_type_counts},
+                "total": dict(sorted(bug_type_counts.items())),
+                "unique": dict(sorted(Counter(entry["bug_type"] for entry in unique_findings.values()).items())),
+                "unique_real": dict(sorted(Counter(entry["bug_type"] for entry in unique_bugs.values()).items())),
             },
         }, indent=2) + "\n",
         encoding="utf-8",
@@ -564,14 +657,23 @@ def _postprocess_atheris_results(
     with open(logs_dir / "bug_counts.csv", "w", encoding="utf-8", newline="") as f:
         writer = _csv.writer(f)
         writer.writerow(["bug_type", "exc_type", "exc_message", "filename", "lineno", "count"])
-        for entry in unique_findings.values():
+        for row in sorted(
+            bug_count_rows.values(),
+            key=lambda row: (
+                str(row["bug_type"]),
+                str(row["filename"]),
+                "" if row["lineno"] == "" else f"{int(row['lineno']):09d}",
+                str(row["exc_type"]),
+                str(row["exc_message"]),
+            ),
+        ):
             writer.writerow([
-                entry["bug_type"],
-                "",
-                entry["exception"],
-                entry["crash_file"],
-                "",
-                1,
+                row["bug_type"],
+                row["exc_type"],
+                row["exc_message"],
+                row["filename"],
+                row["lineno"],
+                row["count"],
             ])
 
     # minimal plot_data CSV so plot_progress.py can render a chart
@@ -584,6 +686,21 @@ def _postprocess_atheris_results(
                 "interesting_test_cases", "corpus_size", "unique_bugs", "unique_crashes",
             ])
             writer.writerow([round(duration, 3), 0, 0, 0, 0, len(unique_bugs), total_crashes])
+
+    stats_lines = [
+        f"Target          : {target}",
+        f"Wall time       : {duration:.1f}s",
+        "Total execs     : Atheris-managed (see atheris.log)",
+        "Coverage seen   : Atheris-managed (see atheris.log)",
+        f"Interesting results: {sum(bug_type_counts.values())}",
+        f"Unique bugs     : {len(unique_bugs)}",
+        f"Parser-site uniq: {len(parser_site_bug_signatures)}",
+        f"Traceback-unique: {len(traceback_bug_signatures)}",
+        f"Unique crashes  : {total_crashes}",
+    ]
+    stats_text = "\n".join(stats_lines) + "\n"
+    (results_dir / "stats.txt").write_text(stats_text, encoding="utf-8")
+    (results_dir / "fuzzer_stats").write_text(stats_text, encoding="utf-8")
 
     print(f"[*] Post-processed: {len(unique_bugs)} unique bugs, {total_crashes} crashes → results/{target}/")
 
@@ -639,8 +756,8 @@ def fuzz(
     no_gradient_guidance: bool = False,
     no_retrain: bool = False,
     fixed_lr: bool = False,
-    no_qemu: bool = False,
     run_id: str = "",
+    coverage_mode: str = "auto",
 ) -> None:
     """Run the hybrid fuzzer against one target."""
 
@@ -654,12 +771,16 @@ def fuzz(
     startup_clock = time.perf_counter()
 
     if fresh_start:
+        phase_clock = time.perf_counter()
         _reset_target_state(target, run_id)
+        print(f"[*] Fresh-start cleanup: {_elapsed_ms(phase_clock):7.1f} ms")
 
+    phase_clock = time.perf_counter()
     resolved_mode = _resolve_evaluation_mode(
         evaluation_mode,
         disable_dl=disable_dl,
     )
+    print(f"[*] Mode resolved : {_elapsed_ms(phase_clock):7.1f} ms")
 
     phase_clock = time.perf_counter()
     fmt = load_format(target)
@@ -707,6 +828,8 @@ def fuzz(
     scheduler = None
     checkpoint_loaded = False
     checkpoint_metadata: dict = {}
+    _dl_bg_event: threading.Event | None = None
+    _dl_bg_result: dict = {}
     phase_clock = time.perf_counter()
     if resolved_mode == "havoc_only":
         scheduler = FixedScheduler(fmt, semantic_probability=0.0, guided_ratio=0.0)
@@ -727,33 +850,49 @@ def fuzz(
             f"({_elapsed_ms(phase_clock):7.1f} ms)"
         )
     else:
-        try:
-            import torch
-            from dl.surrogate import CoverageSurrogate, DLScheduler
-            from dl.trainer import load_checkpoint, save_checkpoint, train
-            from dl.trustworthiness import is_trustworthy
-
-            model = CoverageSurrogate()
-            model._optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-            scheduler = DLScheduler(model, is_trustworthy, fmt)
-            checkpoint_state = load_checkpoint(model, _checkpoint_key(target, run_id), scheduler.device)
-            checkpoint_loaded = bool(checkpoint_state.get("loaded"))
-            checkpoint_metadata = _json_safe_metadata(checkpoint_state.get("metadata"))
-            scheduler.load_runtime_metadata(checkpoint_state.get("metadata"))
-            model.eval()
-            print(
-                f"[*] Scheduler     : Hybrid DLScheduler (device={scheduler.device}) "
-                f"({_elapsed_ms(phase_clock):7.1f} ms)"
-            )
-        except ImportError:
+        import importlib.util
+        if importlib.util.find_spec("torch") is None:
             if evaluation_mode == "hybrid_dl":
                 raise RuntimeError(
                     "evaluation mode 'hybrid_dl' requires torch to be installed"
-                ) from None
+                )
             scheduler = StaticScheduler(fmt)
             resolved_mode = "static_payoff"
+            _dl_bg_event = None
             print(
                 f"[*] Scheduler     : StaticScheduler (torch not installed; fell back from auto) "
+                f"({_elapsed_ms(phase_clock):7.1f} ms)"
+            )
+        else:
+            # Start with static scheduler immediately; CUDA/DL init runs in background.
+            scheduler = StaticScheduler(fmt)
+            _dl_bg_result: dict = {}
+            _dl_bg_event = threading.Event()
+
+            def _init_dl_background(
+                _target=target, _fmt=fmt, _run_id=run_id,
+            ) -> None:
+                try:
+                    import torch as _torch
+                    from dl.surrogate import CoverageSurrogate, DLScheduler
+                    from dl.trainer import load_checkpoint
+                    from dl.trustworthiness import is_trustworthy
+                    _m = CoverageSurrogate()
+                    _m._optimizer = _torch.optim.Adam(_m.parameters(), lr=1e-3)
+                    _s = DLScheduler(_m, is_trustworthy, _fmt)
+                    _ck = load_checkpoint(_m, _checkpoint_key(_target, _run_id), _s.device)
+                    _m.eval()
+                    _dl_bg_result.update({"model": _m, "scheduler": _s, "checkpoint_state": _ck})
+                except Exception as _exc:
+                    _dl_bg_result["error"] = str(_exc)
+                finally:
+                    _dl_bg_event.set()
+
+            threading.Thread(
+                target=_init_dl_background, daemon=True, name="dl-init"
+            ).start()
+            print(
+                f"[*] Scheduler     : StaticScheduler → DLScheduler (CUDA warming up in background) "
                 f"({_elapsed_ms(phase_clock):7.1f} ms)"
             )
 
@@ -762,8 +901,8 @@ def fuzz(
     print(f"[*] Havoc primed  : {_elapsed_ms(phase_clock):7.1f} ms")
 
     phase_clock = time.perf_counter()
-    executor = Executor(target, use_qemu=not no_qemu)
-    coverage = CoverageAnalyzer()
+    executor = Executor(target, coverage_mode=coverage_mode)
+    coverage = CoverageAnalyzer(use_afl_hit_count_buckets=executor.mode == "Frida")
     metrics = MetricsCollector(target, out_dir=_run_dir(target, run_id))
 
     print(f"[*] Executor mode : {executor.mode} ({_elapsed_ms(phase_clock):7.1f} ms)")
@@ -787,7 +926,8 @@ def fuzz(
             "binary_path": str(executor.binary),
             "scheduler": type(scheduler).__name__,
             "scheduler_mode": resolved_mode,
-            "dl_enabled": model is not None,
+            "dl_enabled": model is not None or _dl_bg_event is not None,
+            "dl_init_pending": _dl_bg_event is not None,
             "checkpoint_loaded": checkpoint_loaded,
             "checkpoint_metadata": checkpoint_metadata,
             "semantic_mutation_enabled": resolved_mode != "havoc_only",
@@ -795,7 +935,7 @@ def fuzz(
             "behavior_proxy_dim": getattr(model, "COV_DIM", None),
             "behavior_proxy_note": (
                 "DL model learns a compressed behavior proxy, not the full runtime bitmap"
-                if model is not None
+                if model is not None or _dl_bg_event is not None
                 else None
             ),
             "format_config": fmt,
@@ -804,7 +944,7 @@ def fuzz(
     metrics.write_dl_summary(
         {
             "target": target,
-            "dl_enabled": model is not None,
+            "dl_enabled": model is not None or _dl_bg_event is not None,
             "evaluation_mode_requested": evaluation_mode,
             "evaluation_mode_resolved": resolved_mode,
             "checkpoint_loaded": checkpoint_loaded,
@@ -815,7 +955,7 @@ def fuzz(
             "behavior_proxy_dim": getattr(model, "COV_DIM", None),
             "behavior_proxy_note": (
                 "Compressed proxy target built from observed bitmap positions represented in the model output"
-                if model is not None
+                if model is not None or _dl_bg_event is not None
                 else None
             ),
         }
@@ -838,6 +978,24 @@ def fuzz(
     _BUG_STAGNATION_STOP = 500   # suggest stopping after this many execs without a new unique bug
 
     while time.time() - start < time_budget_secs:
+        # Upgrade from StaticScheduler to DLScheduler once background CUDA init completes.
+        if _dl_bg_event is not None and _dl_bg_event.is_set():
+            if _dl_bg_result.get("model") is not None and model is None:
+                model = _dl_bg_result["model"]
+                scheduler = _dl_bg_result["scheduler"]
+                _ck_state = _dl_bg_result.get("checkpoint_state", {})
+                checkpoint_loaded = bool(_ck_state.get("loaded"))
+                checkpoint_metadata = _json_safe_metadata(_ck_state.get("metadata", {}))
+                scheduler.load_runtime_metadata(_ck_state.get("metadata"))
+                _dl_bg_event = None
+                print(
+                    f"[DL] Upgraded to DLScheduler (device={scheduler.device}) "
+                    f"after {time.time() - start:.0f}s elapsed"
+                )
+            elif _dl_bg_result.get("error") and model is None:
+                print(f"[DL] Background init failed: {_dl_bg_result['error']} — continuing with StaticScheduler")
+                _dl_bg_event = None
+
         generation_clock = time.perf_counter()
         seed = corpus.select(priority_fn=scheduler.get_seed_priority)
         metrics.record_energy(seed, scheduler.get_seed_priority(seed))
@@ -849,10 +1007,11 @@ def fuzz(
             else getattr(scheduler, "get_hot_bytes", lambda current_seed: [])(seed)
         )
 
-        # 10% of the time run the seed unmodified (all tiers skipped) so valid
+        # 5% of the time run the seed unmodified (all tiers skipped) so valid
         # inputs like 255.255.255.255 reach the parser intact.
+        # Keep this low: each execution costs ~60 s so replay wastes budget.
         semantic_trace = {"applied": False}
-        pass_through = random.random() < 0.20
+        pass_through = random.random() < 0.05
         if pass_through:
             mutated = seed
             havoc_trace = {"applied": False}
@@ -873,6 +1032,9 @@ def fuzz(
                 plan.get("preferred_fields"),
             )
 
+            # Pick a second corpus entry for true cross-seed splice.
+            splice_seed = corpus.select() if len(corpus) > 1 else None
+
             tier3 = HavocMutator(plan["weights"])
             mutated = tier3.mutate(
                 mutated,
@@ -881,6 +1043,7 @@ def fuzz(
                 preferred_indices=preferred_indices,
                 field_lookup=field_lookup,
                 guided_ratio=0.0 if no_gradient_guidance else float(plan.get("guided_ratio", 0.7)),
+                splice_seed=splice_seed,
             )
             havoc_trace = tier3.consume_last_trace()
 
@@ -968,7 +1131,7 @@ def fuzz(
             behaviors_since_last_train += 1
 
             if model is not None and not no_retrain and behaviors_since_last_train >= TRAIN_EVERY:
-                from dl.trainer import compute_misprediction_rate
+                from dl.trainer import compute_misprediction_rate, save_checkpoint, train
                 recent_samples = training_buffer[-TRAIN_EVERY:]
                 misprediction_rate = compute_misprediction_rate(
                     model, recent_samples, scheduler.device
@@ -1019,7 +1182,7 @@ def fuzz(
         metrics.record_plot_point(len(corpus))
 
     if model is not None and not no_retrain and training_buffer:
-        from dl.trainer import compute_misprediction_rate
+        from dl.trainer import compute_misprediction_rate, save_checkpoint, train
         misprediction_rate = compute_misprediction_rate(
             model, training_buffer[-TRAIN_EVERY:], scheduler.device
         )
@@ -1099,14 +1262,45 @@ def _fuzz_worker(kwargs: dict) -> None:
     fuzz(**kwargs)
 
 
+def _bootstrap_target(
+    target: str,
+    *,
+    refresh: bool = False,
+    examples_limit: int | None = None,
+    model: str | None = None,
+) -> None:
+    fmt = load_format(target)
+    profile, path = ensure_bootstrap_profile(
+        target,
+        fmt,
+        refresh=refresh,
+        examples_limit=examples_limit,
+        model=model,
+    )
+    valid_count = len(profile.get("seed_examples_valid", []))
+    invalid_count = len(profile.get("seed_examples_invalid", []))
+    print(f"[*] Bootstrap target : {target}")
+    print(f"[*] Bootstrap path   : {path}")
+    print(f"[*] Bootstrap source : {profile.get('source', 'unknown')}")
+    print(f"[*] Format kind      : {profile.get('format_kind', 'text')}")
+    print(f"[*] Seed encoding    : {profile.get('seed_encoding', 'utf-8')}")
+    print(f"[*] Seeds            : {valid_count} valid / {invalid_count} invalid")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Hybrid Coverage-Guided Format Fuzzer")
     parser.add_argument(
         "target",
         help=(
             "Parser to fuzz (e.g. ipv4, ipv6, json, or any registered format; "
-            "'all' runs ipv4+ipv6+cidrize)"
+            "'all' runs ipv4+ipv6+cidrize; use 'bootstrap <target>' to cache "
+            "LLM/manual seed profiles for new formats)"
         ),
+    )
+    parser.add_argument(
+        "bootstrap_target",
+        nargs="?",
+        help="Target name for the bootstrap subcommand",
     )
     parser.add_argument(
         "--havoc-iters",
@@ -1176,11 +1370,6 @@ def main() -> None:
         ),
     )
     parser.add_argument(
-        "--no-qemu",
-        action="store_true",
-        help="Disable QEMU mode and use Linux behavior-hash mode instead",
-    )
-    parser.add_argument(
         "--instances",
         type=int,
         default=1,
@@ -1191,9 +1380,47 @@ def main() -> None:
             "(default: 1, writes to results/<target>/)"
         ),
     )
+    parser.add_argument(
+        "--refresh-bootstrap",
+        action="store_true",
+        help="Regenerate config/<target>_bootstrap.json even if it already exists",
+    )
+    parser.add_argument(
+        "--bootstrap-examples-limit",
+        type=int,
+        default=None,
+        help="Maximum total examples to request or emit during bootstrap generation",
+    )
+    parser.add_argument(
+        "--bootstrap-model",
+        default=None,
+        help="Optional OpenAI model override for bootstrap generation",
+    )
+    parser.add_argument(
+        "--coverage",
+        choices=["auto", "frida", "hash"],
+        default="auto",
+        help=(
+            "Coverage instrumentation mode: "
+            "'auto' selects Frida on Linux with a linux binary, else behavior-hash; "
+            "'frida' forces Frida edge coverage (requires Linux + linux binary); "
+            "'hash' forces behavior-hash bitmap regardless of platform (default: auto)"
+        ),
+    )
     args = parser.parse_args()
 
     random.seed(args.seed)
+
+    if args.target == "bootstrap":
+        if not args.bootstrap_target:
+            parser.error("bootstrap requires a target name, e.g. 'python main.py bootstrap pdf'")
+        _bootstrap_target(
+            args.bootstrap_target,
+            refresh=args.refresh_bootstrap,
+            examples_limit=args.bootstrap_examples_limit,
+            model=args.bootstrap_model,
+        )
+        return
 
     fuzz_kwargs = dict(
         havoc_iters=args.havoc_iters,
@@ -1205,7 +1432,7 @@ def main() -> None:
         no_gradient_guidance=args.no_gradient_guidance,
         no_retrain=args.no_retrain,
         fixed_lr=args.fixed_lr,
-        no_qemu=args.no_qemu,
+        coverage_mode=args.coverage,
     )
 
     def _expand_worker_kwargs(targets: list[str]) -> list[dict]:

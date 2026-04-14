@@ -1,5 +1,6 @@
 {
   "format": "Cidrize",
+  "instrumentation": "frida",
   "fields": [
     "address",
     "cidr_prefix",

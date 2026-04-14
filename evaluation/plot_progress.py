@@ -11,10 +11,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS_DIR = ROOT / "results"
 SERIES = (
-    ("coverage_seen", "#1d4ed8", "Coverage seen"),
+    ("coverage_percent", "#1d4ed8", "Coverage"),
     ("unique_bugs", "#b91c1c", "Unique bugs"),
     ("corpus_size", "#047857", "Corpus size"),
     ("unique_crashes", "#7c3aed", "Unique crashes"),
+)
+BUG_TYPE_SERIES = (
+    ("validity_bugs", "#b91c1c", "Validity"),
+    ("functional_bugs", "#d97706", "Functional"),
+    ("bonus_bugs", "#7c3aed", "Bonus"),
 )
 DL_SERIES = (
     ("loss", "#d97706", "DL Training Loss"),
@@ -61,7 +66,41 @@ def load_rows(plot_path: Path) -> list[dict[str, float]]:
             parsed = {key: float(value) for key, value in row.items()}
             if "coverage_seen" not in parsed and "behaviors_seen" in parsed:
                 parsed["coverage_seen"] = parsed["behaviors_seen"]
+            # interesting_test_cases falls back to corpus_size (ISTD graphs)
+            if "interesting_test_cases" not in parsed:
+                parsed["interesting_test_cases"] = parsed.get("corpus_size", 0.0)
+            # backward compat: older plot_data files lack these columns
+            parsed.setdefault("validity_bugs", 0.0)
+            parsed.setdefault("functional_bugs", 0.0)
+            parsed.setdefault("bonus_bugs", 0.0)
+            t = parsed.get("relative_time_sec", 0.0)
+            parsed["execs_per_sec"] = parsed.get("total_execs", 0.0) / t if t > 0 else 0.0
             rows.append(parsed)
+    return add_bitmap_coverage_percent(rows)
+
+
+def add_bitmap_coverage_percent(rows: list[dict[str, float]]) -> list[dict[str, float]]:
+    """Add percentage-of-bitmap coverage for fixed-size bitmap targets."""
+    for row in rows:
+        coverage = float(row.get("coverage_seen", 0.0))
+        row["coverage_percent"] = (coverage / 65536.0) * 100.0
+    return rows
+
+
+def add_atheris_coverage_percent(rows: list[dict[str, float]]) -> list[dict[str, float]]:
+    """Add percentage-of-final-observed coverage for Atheris targets.
+
+    Atheris/libFuzzer logs expose ``cov`` as a raw count but do not report the
+    total number of instrumentable units, so we normalize against the final
+    observed ``cov`` from the current run instead of claiming an absolute total.
+    """
+    if not rows:
+        return rows
+
+    final_cov = max(float(rows[-1].get("coverage_seen", 0.0)), 1.0)
+    for row in rows:
+        coverage = float(row.get("coverage_seen", 0.0))
+        row["coverage_percent"] = (coverage / final_cov) * 100.0
     return rows
 
 
@@ -120,9 +159,13 @@ def load_atheris_rows(results_dir: Path) -> list[dict[str, float]]:
                 "corpus_size": float(corp),
                 "unique_bugs": float(unique_bugs),
                 "unique_crashes": float(unique_crashes),
+                "validity_bugs": 0.0,
+                "functional_bugs": 0.0,
+                "bonus_bugs": 0.0,
+                "execs_per_sec": float(exec_s),
             })
 
-    return rows
+    return add_atheris_coverage_percent(rows)
 
 
 def load_dl_rows(results_dir: Path) -> list[dict[str, float]]:
@@ -177,6 +220,7 @@ def render_panel(
     width: float,
     height: float,
     is_float: bool = False,
+    final_note: str | None = None,
 ) -> str:
     times = [row["relative_time_sec"] for row in rows]
     values = [row[key] for row in rows]
@@ -188,10 +232,12 @@ def render_panel(
 
     fmt = (lambda v: f"{v:.3f}") if is_float else (lambda v: str(int(v)))
 
+    subtitle = final_note if final_note is not None else f"Final: {fmt(values[-1])}"
+
     parts = [
         f'<rect x="{x0:.1f}" y="{y0:.1f}" width="{width:.1f}" height="{height:.1f}" rx="14" fill="#ffffff" stroke="#cbd5e1" />',
         f'<text x="{x0 + 16:.1f}" y="{y0 + 28:.1f}" font-size="19" font-weight="700" fill="#0f172a">{label}</text>',
-        f'<text x="{x0 + 16:.1f}" y="{y0 + 50:.1f}" font-size="14" fill="#475569">Final: {fmt(values[-1])}</text>',
+        f'<text x="{x0 + 16:.1f}" y="{y0 + 50:.1f}" font-size="14" fill="#475569">{subtitle}</text>',
         f'<line x1="{x0 + 44:.1f}" y1="{y0 + 22:.1f}" x2="{x0 + 44:.1f}" y2="{y0 + height - 28:.1f}" stroke="#94a3b8" stroke-width="1.5" />',
         f'<line x1="{x0 + 44:.1f}" y1="{y0 + height - 28:.1f}" x2="{x0 + width - 16:.1f}" y2="{y0 + height - 28:.1f}" stroke="#94a3b8" stroke-width="1.5" />',
         f'<line x1="{x0 + 44:.1f}" y1="{y0 + 38:.1f}" x2="{x0 + width - 16:.1f}" y2="{y0 + 38:.1f}" stroke="#e2e8f0" stroke-width="1" />',
@@ -208,7 +254,74 @@ def render_panel(
     return "".join(parts)
 
 
-def render_svg(rows: list[dict[str, float]], title: str, dl_rows: list[dict[str, float]] | None = None) -> str:
+def render_multi_panel(
+    rows: list[dict[str, float]],
+    series_list: tuple,
+    label: str,
+    x0: float,
+    y0: float,
+    width: float,
+    height: float,
+) -> str:
+    """Render a panel with multiple polylines sharing the same axes."""
+    times = [row["relative_time_sec"] for row in rows]
+    xs = scale_x(times, x0, width)
+
+    # Shared y-axis: max across all series
+    all_values = [row.get(key, 0.0) for key, _, _ in series_list for row in rows]
+    y_max = max(max(all_values), 1.0)
+    plot_top = y0 + 62
+    plot_bottom = y0 + height - 28
+    plot_height = plot_bottom - plot_top
+
+    def to_y(v: float) -> float:
+        return plot_bottom - (v / y_max) * plot_height
+
+    mid_y = (plot_top + plot_bottom) / 2
+
+    # Legend: colored dots + labels spaced across the top
+    legend_parts = []
+    legend_x = x0 + 16
+    for key, color, sublabel in series_list:
+        legend_parts.append(
+            f'<circle cx="{legend_x:.1f}" cy="{y0 + 50:.1f}" r="5" fill="{color}" />'
+            f'<text x="{legend_x + 9:.1f}" y="{y0 + 55:.1f}" font-size="13" fill="#475569">{sublabel}</text>'
+        )
+        legend_x += 90
+
+    parts = [
+        f'<rect x="{x0:.1f}" y="{y0:.1f}" width="{width:.1f}" height="{height:.1f}" rx="14" fill="#ffffff" stroke="#cbd5e1" />',
+        f'<text x="{x0 + 16:.1f}" y="{y0 + 28:.1f}" font-size="19" font-weight="700" fill="#0f172a">{label}</text>',
+        *legend_parts,
+        f'<line x1="{x0 + 44:.1f}" y1="{plot_top - 16:.1f}" x2="{x0 + 44:.1f}" y2="{plot_bottom:.1f}" stroke="#94a3b8" stroke-width="1.5" />',
+        f'<line x1="{x0 + 44:.1f}" y1="{plot_bottom:.1f}" x2="{x0 + width - 16:.1f}" y2="{plot_bottom:.1f}" stroke="#94a3b8" stroke-width="1.5" />',
+        f'<line x1="{x0 + 44:.1f}" y1="{plot_top:.1f}" x2="{x0 + width - 16:.1f}" y2="{plot_top:.1f}" stroke="#e2e8f0" stroke-width="1" />',
+        f'<line x1="{x0 + 44:.1f}" y1="{mid_y:.1f}" x2="{x0 + width - 16:.1f}" y2="{mid_y:.1f}" stroke="#e2e8f0" stroke-width="1" />',
+        f'<text x="{x0 + 10:.1f}" y="{plot_top + 4:.1f}" font-size="12" fill="#64748b">{int(y_max)}</text>',
+        f'<text x="{x0 + 10:.1f}" y="{mid_y + 4:.1f}" font-size="12" fill="#64748b">{int(y_max / 2)}</text>',
+        f'<text x="{x0 + 18:.1f}" y="{plot_bottom - 4:.1f}" font-size="12" fill="#64748b">0</text>',
+        f'<text x="{x0 + 44:.1f}" y="{y0 + height - 8:.1f}" font-size="12" fill="#64748b">{times[0]:.0f}s</text>',
+        f'<text x="{x0 + width - 46:.1f}" y="{y0 + height - 8:.1f}" font-size="12" fill="#64748b">{times[-1]:.0f}s</text>',
+    ]
+
+    for key, color, _ in series_list:
+        values = [row.get(key, 0.0) for row in rows]
+        ys = [to_y(v) for v in values]
+        points = list(zip(xs, ys))
+        end_x, end_y = points[-1]
+        parts.append(f'<polyline fill="none" stroke="{color}" stroke-width="3" points="{svg_polyline(points)}" />')
+        parts.append(f'<circle cx="{end_x:.1f}" cy="{end_y:.1f}" r="4" fill="{color}" />')
+
+    return "".join(parts)
+
+
+def render_svg(
+    rows: list[dict[str, float]],
+    title: str,
+    dl_rows: list[dict[str, float]] | None = None,
+    coverage_label: str = "Coverage",
+    coverage_note: str | None = None,
+) -> str:
     if not rows:
         return render_empty_svg(title)
 
@@ -224,11 +337,13 @@ def render_svg(rows: list[dict[str, float]], title: str, dl_rows: list[dict[str,
         dl_section_height = 60 + panel_height + panel_gap_y
 
     width = 1200
-    height = panel_top + 2 * (panel_height + panel_gap_y) + dl_section_height + 40
+    height = panel_top + 3 * (panel_height + panel_gap_y) + dl_section_height + 40
     header_x = 72
+    final_execs_per_sec = rows[-1].get("execs_per_sec", 0.0)
     summary = (
         f"Samples: {len(rows)} | Final execs: {int(rows[-1]['total_execs'])} | "
-        f"Final time: {rows[-1]['relative_time_sec']:.1f}s"
+        f"Final time: {rows[-1]['relative_time_sec']:.1f}s | "
+        f"Execs/s: {final_execs_per_sec:.0f}"
     )
 
     panels = []
@@ -237,11 +352,52 @@ def render_svg(rows: list[dict[str, float]], title: str, dl_rows: list[dict[str,
         col_idx = index % 2
         x0 = panel_left + col_idx * (panel_width + panel_gap_x)
         y0 = panel_top + row_idx * (panel_height + panel_gap_y)
-        panels.append(render_panel(rows, key, color, label, x0, y0, panel_width, panel_height))
+        panel_label = coverage_label if key == "coverage_percent" else label
+        panel_note = coverage_note if key == "coverage_percent" else None
+        panels.append(
+            render_panel(
+                rows,
+                key,
+                color,
+                panel_label,
+                x0,
+                y0,
+                panel_width,
+                panel_height,
+                final_note=panel_note,
+            )
+        )
+
+    # Row 3: Bug types (multi-series) + Execs/sec
+    row3_y = panel_top + 2 * (panel_height + panel_gap_y)
+    panels.append(
+        render_multi_panel(
+            rows,
+            BUG_TYPE_SERIES,
+            "Bug types over time",
+            panel_left,
+            row3_y,
+            panel_width,
+            panel_height,
+        )
+    )
+    panels.append(
+        render_panel(
+            rows,
+            "execs_per_sec",
+            "#0891b2",
+            "Execs/sec",
+            panel_left + panel_width + panel_gap_x,
+            row3_y,
+            panel_width,
+            panel_height,
+            is_float=False,
+        )
+    )
 
     dl_panels_html = ""
     if dl_rows:
-        dl_section_y = panel_top + 2 * (panel_height + panel_gap_y) + 20
+        dl_section_y = panel_top + 3 * (panel_height + panel_gap_y) + 20
         dl_panels_html = (
             f'<text x="{header_x}" y="{dl_section_y - 8:.1f}" font-size="18" font-weight="700" fill="#0f172a">DL Surrogate Training</text>'
         )
@@ -259,6 +415,112 @@ def render_svg(rows: list[dict[str, float]], title: str, dl_rows: list[dict[str,
   <text x="{header_x}" y="84" font-size="15" fill="#475569">{summary}</text>
   {''.join(panels)}
   {dl_panels_html}
+</svg>
+"""
+
+
+def render_istd_graph(
+    *,
+    title: str,
+    subtitle: str,
+    x_values: list[float],
+    x_label: str,
+    y_values: list[float],
+    left: float,
+    top: float,
+    width: float,
+    height: float,
+    color: str,
+) -> str:
+    plot_left = left + 58
+    plot_top = top + 56
+    plot_width = width - 84
+    plot_height = height - 100
+    # scale x
+    plot_right = plot_left + plot_width
+    if len(x_values) <= 1 or (max(x_values) - min(x_values)) <= 0:
+        xs = [plot_left + plot_width / 2 for _ in x_values]
+    else:
+        lo, hi = min(x_values), max(x_values)
+        xs = [plot_left + ((v - lo) / (hi - lo)) * (plot_right - plot_left) for v in x_values]
+    # scale y
+    plot_bottom = plot_top + plot_height
+    y_max = max(max(y_values), 1.0)
+    ys = [plot_bottom - (v / y_max) * plot_height for v in y_values]
+    points = list(zip(xs, ys))
+    mid_y = plot_top + plot_height / 2
+    x_min = min(x_values) if x_values else 0.0
+    x_max = max(x_values) if x_values else 0.0
+
+    return (
+        f'<rect x="{left:.1f}" y="{top:.1f}" width="{width:.1f}" height="{height:.1f}" '
+        f'rx="16" fill="#ffffff" stroke="#cbd5e1" />'
+        f'<text x="{left + 18:.1f}" y="{top + 28:.1f}" font-size="18" font-weight="700" fill="#0f172a">{title}</text>'
+        f'<text x="{left + 18:.1f}" y="{top + 48:.1f}" font-size="13" fill="#475569">{subtitle}</text>'
+        f'<line x1="{plot_left:.1f}" y1="{plot_top:.1f}" x2="{plot_left:.1f}" y2="{plot_bottom:.1f}" stroke="#94a3b8" stroke-width="1.5" />'
+        f'<line x1="{plot_left:.1f}" y1="{plot_bottom:.1f}" x2="{plot_left + plot_width:.1f}" y2="{plot_bottom:.1f}" stroke="#94a3b8" stroke-width="1.5" />'
+        f'<line x1="{plot_left:.1f}" y1="{plot_top:.1f}" x2="{plot_left + plot_width:.1f}" y2="{plot_top:.1f}" stroke="#e2e8f0" stroke-width="1" />'
+        f'<line x1="{plot_left:.1f}" y1="{mid_y:.1f}" x2="{plot_left + plot_width:.1f}" y2="{mid_y:.1f}" stroke="#e2e8f0" stroke-width="1" />'
+        f'<text x="{left + 8:.1f}" y="{plot_top + 4:.1f}" font-size="12" fill="#64748b">{int(y_max)}</text>'
+        f'<text x="{left + 8:.1f}" y="{mid_y + 4:.1f}" font-size="12" fill="#64748b">{int(y_max / 2)}</text>'
+        f'<text x="{left + 18:.1f}" y="{plot_bottom + 4:.1f}" font-size="12" fill="#64748b">0</text>'
+        f'<text x="{plot_left:.1f}" y="{plot_bottom + 22:.1f}" font-size="12" fill="#64748b">{int(x_min)}</text>'
+        f'<text x="{plot_left + plot_width - 28:.1f}" y="{plot_bottom + 22:.1f}" font-size="12" fill="#64748b">{int(x_max)}</text>'
+        f'<text x="{left + width / 2 - 70:.1f}" y="{top + height - 16:.1f}" font-size="12" fill="#475569">{x_label}</text>'
+        f'<text x="{left + 8:.1f}" y="{top + 70:.1f}" font-size="12" fill="#475569">Interesting tests</text>'
+        f'<polyline fill="none" stroke="{color}" stroke-width="3" points="{" ".join(f"{x:.1f},{y:.1f}" for x, y in points)}" />'
+        f'<circle cx="{points[-1][0]:.1f}" cy="{points[-1][1]:.1f}" r="4" fill="{color}" />'
+    )
+
+
+def render_istd_svg(rows: list[dict[str, float]], title: str) -> str:
+    if not rows:
+        return (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300">'
+            '<rect width="100%" height="100%" fill="#f8fafc" />'
+            f'<text x="48" y="80" font-size="28" font-weight="700" fill="#0f172a">{title}</text>'
+            '<text x="48" y="130" font-size="18" fill="#475569">No plot_data samples found.</text>'
+            '</svg>'
+        )
+
+    time_values = [row["relative_time_sec"] for row in rows]
+    exec_values = [row["total_execs"] for row in rows]
+    interesting_values = [row["interesting_test_cases"] for row in rows]
+    final_interesting = int(interesting_values[-1])
+    final_execs = int(exec_values[-1])
+    final_time = int(time_values[-1])
+
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="520" viewBox="0 0 1200 520" role="img" aria-labelledby="istd-title istd-desc">
+  <title id="istd-title">{title}</title>
+  <desc id="istd-desc">Interesting test cases vs wall-clock time and total tests executed.</desc>
+  <rect width="100%" height="100%" fill="#e2e8f0" />
+  <rect x="18" y="18" width="1164" height="484" rx="24" fill="#f8fafc" />
+  <text x="64" y="58" font-size="30" font-weight="700" fill="#0f172a">{title}</text>
+  <text x="64" y="86" font-size="15" fill="#475569">Final interesting tests: {final_interesting} | Final tests: {final_execs} | Final wall-clock time: {final_time}s</text>
+  {render_istd_graph(
+      title="Graph 1.2",
+      subtitle="Interesting test cases vs wall-clock time",
+      x_values=time_values,
+      x_label="Wall-clock time (seconds)",
+      y_values=interesting_values,
+      left=56,
+      top=126,
+      width=520,
+      height=320,
+      color="#047857",
+  )}
+  {render_istd_graph(
+      title="Graph 1.3",
+      subtitle="Interesting test cases vs total tests",
+      x_values=exec_values,
+      x_label="Total tests generated/executed",
+      y_values=interesting_values,
+      left=624,
+      top=126,
+      width=520,
+      height=320,
+      color="#1d4ed8",
+  )}
 </svg>
 """
 
@@ -294,16 +556,34 @@ def main() -> None:
         rows = load_atheris_rows(results_dir)
         output_path = Path(args.output) if args.output else results_dir / "progress.svg"
         title = f"Fuzzer Progress (Atheris): {results_dir.name}"
+        coverage_label = "Coverage (% of final observed cov)"
+        final_cov = int(rows[-1]["coverage_seen"]) if rows else 0
+        coverage_note = f"Final: 100.0% ({final_cov} cov)"
     else:
         plot_path, output_path = resolve_paths(args.target_or_plot_data, args.output)
         rows = load_rows(plot_path)
         title = f"Fuzzer Progress: {plot_path.parent.name}"
         results_dir = plot_path.parent
+        coverage_label = "Coverage (% of 65536-slot bitmap)"
+        final_cov = rows[-1]["coverage_seen"] if rows else 0.0
+        final_pct = rows[-1]["coverage_percent"] if rows else 0.0
+        coverage_note = f"Final: {final_pct:.3f}% ({int(final_cov)} slots)"
 
     dl_rows = load_dl_rows(results_dir)
-    svg = render_svg(rows, title, dl_rows=dl_rows or None)
+    svg = render_svg(
+        rows,
+        title,
+        dl_rows=dl_rows or None,
+        coverage_label=coverage_label,
+        coverage_note=coverage_note,
+    )
     output_path.write_text(svg, encoding="utf-8")
     print(f"Wrote {output_path}")
+
+    eval_path = output_path.with_name("eval_graphs.svg")
+    eval_title = f"Evaluation Graphs: {results_dir.name}"
+    eval_path.write_text(render_istd_svg(rows, eval_title), encoding="utf-8")
+    print(f"Wrote {eval_path}")
 
 
 if __name__ == "__main__":

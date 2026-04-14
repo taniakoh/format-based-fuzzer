@@ -1,52 +1,50 @@
 """
-Module 4 — Execution Engine.
+Module 4 - Execution Engine.
 
 Wraps the parser binaries and returns a (behavior_bitmap, crashed, result)
-triple that mirrors the AFL++ interface described in the implementation guide.
+triple that mirrors the rest of the fuzzer pipeline.
 
 Coverage modes
 --------------
-Three modes are selected automatically at startup:
+Two modes are selected automatically at startup:
 
-  QEMU      Linux binary + afl-showmap -Q available
-            → real 65536-byte edge-coverage bitmap from AFL++ QEMU
-              instrumentation.  Thousands of unique edges possible.
-              Timeout: 5 s (no PyInstaller overhead).
-
-  Linux     Linux binary present but afl-showmap not found
-            → behavior-hash bitmap (same as Windows mode) but with
-              faster execution.  Timeout: 5 s.
+  Frida     Linux binary + Frida available
+            -> native Linux execution with Frida Stalker block coverage.
+               The observed basic-block addresses are hashed into the
+               existing 65536-byte bitmap and fed through AFL-style novelty
+               tracking. Timeout: 30 s.
 
   Windows   Opaque PyInstaller .exe bundles (win-ipv4/ipv6-parser.exe)
-            → behavior-hash bitmap: each unique (bug_type, exception_msg)
-              pair is SHA-256 hashed to a stable slot in the bitmap.
-              Timeout: 60 s (PyInstaller unpacks to a temp dir at startup).
+            -> behavior-hash bitmap: each unique (bug_type, exception_msg)
+               pair is SHA-256 hashed to a stable slot in the bitmap.
+               Timeout: 60 s (PyInstaller unpacks to a temp dir at startup).
 
 The Executor.mode property exposes which mode is active so callers can
 log it at startup.
 """
 
+from __future__ import annotations
+
+import ast
 import hashlib
 import os
 import re
-import shutil
+import signal
 import subprocess
 import sys
-import tempfile
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from fuzzer.oracle import OracleVerdict, evaluate_target_input
 
 _HERE = Path(__file__).parent.parent
 
-# Timeouts
-TIMEOUT_SECONDS_WIN   = 60   # PyInstaller bundles need ~20-30 s to unpack
-TIMEOUT_SECONDS_LINUX = 30   # Native ELF — no unpack overhead
+TIMEOUT_SECONDS_WIN = 60
+TIMEOUT_SECONDS_LINUX = 30
 
 BITMAP_SIZE = 65536
-
-# ── Binary registry ───────────────────────────────────────────────────────────
 
 _WINDOWS_BINARIES: dict[str, Path] = {
     "ipv4": _HERE / "ipv4ipv6" / "win-ipv4-parser.exe",
@@ -60,8 +58,131 @@ _LINUX_BINARIES: dict[str, Path] = {
 
 _WINDOWS_ARGS: dict[str, list[str]] = {}
 _LINUX_ARGS: dict[str, list[str]] = {}
-_INPUT_ARGS: dict[str, str] = {}  # per-target input flag name (default: --ipstr)
-_INPUT_ENCODINGS: dict[str, str] = {}  # per-target input encoding: "cli_escape" (default) or "raw"
+_INPUT_ARGS: dict[str, str] = {}
+_INPUT_ENCODINGS: dict[str, str] = {}
+
+_IS_LINUX = sys.platform != "win32"
+_FRIDA_MODULE: Any | None = None
+_FRIDA_DEBUG = os.environ.get("FRIDA_DEBUG_FUZZER", "").strip().lower() not in ("", "0", "false", "no")
+
+_FRIDA_AGENT_SOURCE = r"""
+const targetPath = %TARGET_PATH%;
+const targetName = %TARGET_NAME%;
+const BITMAP_SIZE = 65536;
+const batchSize = 512;
+let edgeBuffer = [];
+let prevLoc = 0;
+
+function matchesTargetModule(module) {
+  if (module.path === targetPath)
+    return true;
+  if (module.name === targetName)
+    return true;
+  if (module.path.indexOf(targetName) !== -1)
+    return true;
+  return false;
+}
+
+function flushEdges() {
+  if (edgeBuffer.length === 0)
+    return;
+  send({
+    type: "edges",
+    edges: edgeBuffer
+  });
+  edgeBuffer = [];
+}
+
+function recordEdge(slot) {
+  edgeBuffer.push(slot);
+  if (edgeBuffer.length >= batchSize)
+    flushEdges();
+}
+
+const modules = Process.enumerateModules();
+const targetModule = modules.find(matchesTargetModule) || modules[0];
+send({
+  type: "debug",
+  event: "target-module",
+  moduleName: targetModule ? targetModule.name : null,
+  modulePath: targetModule ? targetModule.path : null,
+  moduleCount: modules.length
+});
+
+modules.forEach(module => {
+  if (module.base.equals(targetModule.base))
+    return;
+  Stalker.exclude(module);
+});
+
+function startFollowing(threadId) {
+  Stalker.follow(threadId, {
+    events: {
+      call: false,
+      ret: false,
+      exec: false,
+      block: true,
+      compile: false
+    },
+    onReceive(events) {
+      send({
+        type: "debug",
+        event: "stalker-batch",
+        byteLength: events.byteLength || 0
+      });
+      const parsed = Stalker.parse(events, {
+        annotate: true,
+        stringify: true
+      });
+
+      parsed.forEach(event => {
+        if (!Array.isArray(event) || event.length < 2)
+          return;
+        if (event[0] !== "block")
+          return;
+        // AFL-QEMU edge hash: curLoc = (pc >> 4) ^ (pc >> 8), then XOR with prevLoc.
+        // Use BigInt for 64-bit addresses, keep lower 32 bits to avoid float precision loss.
+        const lower32 = Number(BigInt(event[1]) & BigInt(0xFFFFFFFF));
+        const curLoc = ((lower32 >>> 4) ^ (lower32 >>> 8)) & (BITMAP_SIZE - 1);
+        const slot = (curLoc ^ prevLoc) & (BITMAP_SIZE - 1);
+        prevLoc = (curLoc >>> 1) & (BITMAP_SIZE - 1);
+        recordEdge(slot);
+      });
+    }
+  });
+}
+
+const threads = Process.enumerateThreads();
+send({
+  type: "debug",
+  event: "thread-scan",
+  threadCount: threads.length,
+  threadIds: threads.map(thread => thread.id)
+});
+
+threads.forEach(thread => {
+  try {
+    startFollowing(thread.id);
+    send({
+      type: "debug",
+      event: "follow-thread",
+      threadId: thread.id
+    });
+  } catch (e) {
+    send({
+      type: "debug",
+      event: "follow-thread-error",
+      threadId: thread.id,
+      error: String(e)
+    });
+  }
+});
+
+rpc.exports.flush = function () {
+  flushEdges();
+  return true;
+};
+"""
 
 
 def register_binary(
@@ -73,15 +194,6 @@ def register_binary(
     input_arg: str | None = None,
     input_encoding: str | None = None,
 ) -> None:
-    """Register binary paths for a new target format.
-
-    Call this before constructing an ``Executor`` for the target, or supply
-    ``binary_windows`` / ``binary_linux`` keys in the format config JSON and
-    let ``main.py`` call this automatically.
-
-    ``input_arg`` overrides the default ``--ipstr`` flag used to pass the fuzz
-    input to the binary (e.g. ``--str-json`` for json_decoder_stv.py).
-    """
     if windows is not None:
         _WINDOWS_BINARIES[target.lower()] = Path(windows)
     if linux is not None:
@@ -95,41 +207,51 @@ def register_binary(
     if input_encoding is not None:
         _INPUT_ENCODINGS[target.lower()] = input_encoding
 
-# ── Platform helpers ──────────────────────────────────────────────────────────
 
-_IS_LINUX = sys.platform != "win32"
+def _load_frida() -> Any:
+    global _FRIDA_MODULE
+    if _FRIDA_MODULE is not None:
+        return _FRIDA_MODULE
+    try:
+        import frida as frida_module
+    except ImportError as exc:
+        raise RuntimeError(
+            "Frida instrumentation is required for Linux black-box targets. "
+            "Install it in the active environment with 'pip install frida frida-tools'."
+        ) from exc
+    _FRIDA_MODULE = frida_module
+    return frida_module
 
 
-def _afl_showmap() -> str | None:
-    """Return the path to afl-showmap if installed AND QEMU mode is available.
-
-    QEMU mode requires the ``afl-qemu-trace`` binary alongside ``afl-showmap``.
-    If that helper is absent, running ``afl-showmap -Q`` fails immediately with
-    "Program 'afl-qemu-trace' not found", so we treat the whole capability as
-    unavailable and fall back to Linux behavior-hash mode.
-    """
-    showmap = shutil.which("afl-showmap")
-    if showmap is None:
-        return None
-    # afl-qemu-trace lives in the same directory as afl-showmap
-    showmap_dir = Path(showmap).parent
-    qemu_trace = showmap_dir / "afl-qemu-trace"
-    if not qemu_trace.exists() and shutil.which("afl-qemu-trace") is None:
-        return None
-    return showmap
+def _frida_debug(message: str) -> None:
+    if _FRIDA_DEBUG:
+        print(f"[FRIDA-DEBUG] {message}", file=sys.stderr, flush=True)
 
 
 def _ensure_executable(path: Path) -> None:
-    """Make sure a Linux binary has the execute bit set."""
     if _IS_LINUX:
         try:
             current = path.stat().st_mode
             path.chmod(current | 0o111)
         except PermissionError:
-            pass  # /mnt/c (NTFS) doesn't support chmod; file is already executable
+            pass
 
 
-# ── Output parsing ────────────────────────────────────────────────────────────
+def _frida_agent_source(binary_path: Path) -> str:
+    return (
+        _FRIDA_AGENT_SOURCE.replace("%TARGET_PATH%", repr(str(binary_path)))
+        .replace("%TARGET_NAME%", repr(binary_path.name))
+    )
+
+
+def _edge_slots_to_bitmap(edge_slots: list[int]) -> bytes:
+    """Build a hit-count bitmap from pre-computed AFL-style edge slot numbers."""
+    bitmap = bytearray(BITMAP_SIZE)
+    counts: Counter[int] = Counter(edge_slots)
+    for slot, count in counts.items():
+        bitmap[slot] = min(count, 255)
+    return bytes(bitmap)
+
 
 _TRACEBACK_BLOCK_RE = re.compile(
     r"={60}\s*\nTRACEBACK\s*\n={60}\s*\n(.*?)\n={60}",
@@ -139,19 +261,26 @@ _TRACEBACK_LAST_LINE_RE = re.compile(r"^\s*([\w.]+):\s*(.*)$")
 _STDERR_TRACEBACK_RE = re.compile(r"(Traceback \(most recent call last\):.*)", re.DOTALL)
 _PARSER_VALIDITY_RE = re.compile(r"\bA validity bug has been triggered:\s*(.+)", re.IGNORECASE)
 _PARSER_INVALIDITY_RE = re.compile(r"\bAn invalidity bug has been triggered:\s*(.+)", re.IGNORECASE)
-_PARSER_FINAL_BUG_RE = re.compile(r"\('(?P<kind>validity|invalidity|bonus|syntactic|reliability)'", re.IGNORECASE)
+_PARSER_FINAL_BUG_RE = re.compile(
+    r"\('(?P<kind>validity|invalidity|bonus|syntactic|reliability|functional|performance)'\s*,\s*"
+    r"<class '(?P<exc_type>[^']+)'>\s*,\s*"
+    r"(?P<message>'(?:\\.|[^'])*'|\"(?:\\.|[^\"])*\")\s*,\s*"
+    r"'(?P<filename>[^']+)'\s*,\s*(?P<lineno>\d+)\)",
+    re.IGNORECASE,
+)
 
 
 class BugType:
-    PASS       = "PASS"
-    VALIDITY   = "validity"
+    PASS = "PASS"
+    VALIDITY = "validity"
     INVALIDITY = "invalidity"
-    SYNTACTIC  = "syntactic"
+    SYNTACTIC = "syntactic"
     RELIABILITY = "reliability"
     PERFORMANCE = "performance"
-    BONUS      = "bonus"
-    CRASH      = "CRASH"
-    TIMEOUT    = "TIMEOUT"
+    FUNCTIONAL = "functional"
+    BONUS = "bonus"
+    CRASH = "CRASH"
+    TIMEOUT = "TIMEOUT"
     ORACLE_MISMATCH = "oracle_mismatch"
     ORACLE_UNKNOWN_ACCEPT = "oracle_unknown_accept"
     ORACLE_UNKNOWN_REJECT = "oracle_unknown_reject"
@@ -159,16 +288,19 @@ class BugType:
 
 @dataclass
 class RunResult:
-    input_str:     str
-    bug_type:      str
-    exit_code:     int | None
-    stdout:        str
-    stderr:        str
+    input_str: str
+    bug_type: str
+    exit_code: int | None
+    stdout: str
+    stderr: str
     exception_msg: str = ""
-    traceback:     str = ""
-    oracle:        OracleVerdict | None = None
+    traceback: str = ""
+    oracle: OracleVerdict | None = None
     parser_reported_bug_type: str | None = None
     parser_reported_message: str = ""
+    parser_reported_exc_type: str = ""
+    parser_reported_filename: str = ""
+    parser_reported_lineno: int | None = None
 
     @property
     def is_interesting(self) -> bool:
@@ -189,16 +321,15 @@ class RunResult:
             BugType.BONUS,
             BugType.RELIABILITY,
             BugType.PERFORMANCE,
+            BugType.FUNCTIONAL,
             BugType.CRASH,
             BugType.TIMEOUT,
-            BugType.ORACLE_MISMATCH,
         )
 
 
 def _parse_output(stdout: str, stderr: str) -> tuple[str, str]:
     combined = stdout + "\n" + stderr
-
-    tb_match       = _TRACEBACK_BLOCK_RE.search(combined)
+    tb_match = _TRACEBACK_BLOCK_RE.search(combined)
     traceback_text = tb_match.group(1).strip() if tb_match else ""
     if not traceback_text:
         stderr_tb = _STDERR_TRACEBACK_RE.search(stderr)
@@ -218,26 +349,42 @@ def _parse_output(stdout: str, stderr: str) -> tuple[str, str]:
     return exception_msg, traceback_text
 
 
-def _parser_reported_bug(stdout: str) -> tuple[str | None, str]:
-    """Extract the parser-declared bug family and message from stdout."""
+def _normalize_parser_bug_kind(kind: str) -> str:
+    normalized = kind.lower()
+    if normalized == "functional":
+        return BugType.FUNCTIONAL
+    return normalized
+
+
+def _parser_reported_bug(stdout: str) -> dict[str, object]:
     match = _PARSER_VALIDITY_RE.search(stdout)
     if match:
-        return BugType.VALIDITY, match.group(1).strip()
+        return {"kind": BugType.VALIDITY, "message": match.group(1).strip(), "exc_type": "", "filename": "", "lineno": None}
 
     match = _PARSER_INVALIDITY_RE.search(stdout)
     if match:
-        return BugType.INVALIDITY, match.group(1).strip()
+        return {"kind": BugType.INVALIDITY, "message": match.group(1).strip(), "exc_type": "", "filename": "", "lineno": None}
 
     match = _PARSER_FINAL_BUG_RE.search(stdout)
     if match:
-        return match.group("kind").lower(), ""
+        message_token = match.group("message")
+        try:
+            message = ast.literal_eval(message_token)
+        except (SyntaxError, ValueError):
+            message = message_token.strip("'\"")
+        return {
+            "kind": _normalize_parser_bug_kind(match.group("kind")),
+            "message": str(message),
+            "exc_type": match.group("exc_type"),
+            "filename": match.group("filename"),
+            "lineno": int(match.group("lineno")),
+        }
 
-    return None, ""
+    return {"kind": None, "message": "", "exc_type": "", "filename": "", "lineno": None}
 
 
 def _taxonomy_tags(result: "RunResult") -> list[str]:
     tags: list[str] = []
-
     if result.parser_reported_bug_type == BugType.VALIDITY or result.bug_type == BugType.VALIDITY:
         tags.append("ValidityBug")
     elif result.parser_reported_bug_type == BugType.INVALIDITY or result.bug_type == BugType.INVALIDITY:
@@ -245,7 +392,7 @@ def _taxonomy_tags(result: "RunResult") -> list[str]:
     elif result.parser_reported_bug_type == BugType.SYNTACTIC or result.bug_type == BugType.SYNTACTIC:
         tags.append("SyntacticBug")
 
-    if result.bug_type == BugType.ORACLE_MISMATCH:
+    if result.parser_reported_bug_type == BugType.FUNCTIONAL or result.bug_type == BugType.FUNCTIONAL:
         tags.append("FunctionalBug")
     if result.is_crash or result.bug_type == BugType.RELIABILITY:
         tags.append("ReliabilityBug")
@@ -255,27 +402,24 @@ def _taxonomy_tags(result: "RunResult") -> list[str]:
         tags.append("Bonus/UntrackedBugs")
     if _is_boundary_input(result.input_str):
         tags.append("BoundaryBug")
-
-    # Keep tag order stable while preventing duplicates.
     return list(dict.fromkeys(tags))
 
 
 _IPV6_BOUNDARY_ADDRS = {
-    "::",                                              # all-zeros
-    "::1",                                             # loopback
-    "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",        # all-ones
-    "::ffff:0:0",                                      # IPv4-mapped base
-    "::ffff:ffff:ffff",                                # IPv4-mapped top
-    "fe80::",                                          # link-local base
-    "fec0::",                                          # site-local base (deprecated)
-    "ff00::",                                          # multicast base
+    "::",
+    "::1",
+    "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+    "::ffff:0:0",
+    "::ffff:ffff:ffff",
+    "fe80::",
+    "fec0::",
+    "ff00::",
 }
 
 _CIDR_BOUNDARY_PREFIXES = {"0", "32", "128"}
 
 
 def _is_boundary_input(input_str: str) -> bool:
-    # IPv4: boundary octets (0, 1, 254, 255)
     parts = input_str.split(".")
     if len(parts) == 4:
         try:
@@ -285,16 +429,13 @@ def _is_boundary_input(input_str: str) -> bool:
         except ValueError:
             pass
 
-    # IPv6: known boundary addresses
     if input_str.lower() in _IPV6_BOUNDARY_ADDRS:
         return True
 
-    # CIDR: boundary prefix lengths (/0, /32, /128) or boundary base addresses
     if "/" in input_str:
         base, _, prefix = input_str.partition("/")
         if prefix.strip() in _CIDR_BOUNDARY_PREFIXES:
             return True
-        # Base is a boundary IPv4 address
         base_parts = base.strip().split(".")
         if len(base_parts) == 4:
             try:
@@ -308,7 +449,6 @@ def _is_boundary_input(input_str: str) -> bool:
 
 
 def _traceback_exception_type(traceback_text: str) -> str:
-    """Return the exception class name from the traceback footer when present."""
     if not traceback_text:
         return ""
     lines = [line.strip() for line in traceback_text.splitlines() if line.strip()]
@@ -321,25 +461,12 @@ def _traceback_exception_type(traceback_text: str) -> str:
 
 
 def _cli_safe_input(input_data: bytes, encoding: str = "cli_escape") -> str:
-    """Render fuzz bytes as a CLI-safe text argument.
-
-    encoding="cli_escape" (default): unicode_escape — safe for all targets,
-        but double-escapes backslash sequences like \\b → \\\\b.
-    encoding="raw": latin-1 decode only — preserves JSON escape sequences
-        (\\b, \\f, \\t) so json_direct can trigger the performance bug.
-        Null bytes are stripped since argv cannot carry them.
-    """
     if encoding == "raw":
         return input_data.replace(b"\x00", b"").decode("latin-1", errors="replace")
-    return input_data.decode("latin-1", errors="replace").encode(
-        "unicode_escape"
-    ).decode("ascii")
+    return input_data.decode("latin-1", errors="replace").encode("unicode_escape").decode("ascii")
 
 
-def _summarize_process_failure(
-    stdout: str, stderr: str, returncode: int | None
-) -> str:
-    """Extract a stable crash signature for launcher/runtime failures."""
+def _summarize_process_failure(stdout: str, stderr: str, returncode: int | None) -> str:
     for stream in (stderr, stdout):
         for line in stream.splitlines():
             message = line.strip()
@@ -350,16 +477,7 @@ def _summarize_process_failure(
     return f"process exited with code {returncode}"
 
 
-# ── Behavior bitmap (fallback for non-QEMU modes) ─────────────────────────────
-
 def _result_to_bitmap(result: RunResult) -> bytes:
-    """
-    Map a RunResult to a sparse behavior bitmap (no AFL++ required).
-
-    A PASS returns an all-zero bitmap (no new information).
-    Any other result sets a single byte determined by hashing the
-    (bug_type, exception_msg) pair — giving each unique error a stable slot.
-    """
     bitmap = bytearray(BITMAP_SIZE)
     if result.bug_type == BugType.PASS:
         return bytes(bitmap)
@@ -367,17 +485,6 @@ def _result_to_bitmap(result: RunResult) -> bytes:
 
 
 def _overlay_result_signal(bitmap: bytearray, result: RunResult) -> bytes:
-    """Overlay stable fallback signals onto an existing bitmap.
-
-    This keeps behavior-hash mode and QEMU mode consistent for outcomes where
-    coverage alone is not a reliable notion of "interesting", especially for
-    crashes/timeouts and oracle-backed validity failures.
-
-    Slot allocation (to avoid collisions):
-      bytes 0-1 : behavior hash  (bug_type + sha256(exception_msg))
-      bytes 2-3 : extra slot for CRASH/TIMEOUT/VALIDITY
-      bytes 4-5 : traceback hash (bug_type + full traceback text)
-    """
     if result.bug_type == BugType.PASS:
         return bytes(bitmap)
 
@@ -390,8 +497,6 @@ def _overlay_result_signal(bitmap: bytearray, result: RunResult) -> bytes:
         pos2 = (digest[2] << 8 | digest[3]) % BITMAP_SIZE
         bitmap[pos2] = 1
 
-    # Separate traceback-based slot: distinguishes bugs with the same exception
-    # message but different call stacks (e.g. same ParseException at different lines).
     if result.traceback:
         tb_key = f"traceback|{result.bug_type}|{result.traceback.strip()[:256]}"
         tb_digest = hashlib.sha256(tb_key.encode()).digest()
@@ -401,32 +506,30 @@ def _overlay_result_signal(bitmap: bytearray, result: RunResult) -> bytes:
     return bytes(bitmap)
 
 
-# ── Executor ──────────────────────────────────────────────────────────────────
-
 class Executor:
-    """
-    Execution engine for the IP-address parser binaries.
+    def __init__(
+        self,
+        target: str,
+        timeout_seconds: int | None = None,
+        coverage_mode: str = "auto",
+    ):
+        """
+        Parameters
+        ----------
+        coverage_mode : "auto" | "frida" | "hash"
+            "auto"  – Frida when on Linux with a linux binary present, else hash.
+            "frida" – Force Frida instrumentation; raises if unavailable.
+            "hash"  – Force behavior-hash bitmap regardless of platform.
+        """
+        if coverage_mode not in ("auto", "frida", "hash"):
+            raise ValueError(f"coverage_mode must be 'auto', 'frida', or 'hash'; got {coverage_mode!r}")
 
-    Selects QEMU / Linux / Windows mode automatically based on the
-    current platform and available tools.  The public interface is always:
-
-        bitmap, crashed, result = executor.run(input_bytes)
-
-    Check ``executor.mode`` after construction to see which mode is active.
-    """
-
-    def __init__(self, target: str, timeout_seconds: int | None = None, use_qemu: bool = True):
         self.target = target
-
-        # Each target gets its own cwd so the binary's logs/ output lands in
-        # results/<target>/logs/ rather than the shared project root logs/.
-        _HERE = Path(__file__).parent.parent
         self._cwd = _HERE / "results" / target
         self._cwd.mkdir(parents=True, exist_ok=True)
 
-        # ── Select binary and mode ────────────────────────────────────────────
         linux_bin = _LINUX_BINARIES.get(target)
-        win_bin   = _WINDOWS_BINARIES.get(target)
+        win_bin = _WINDOWS_BINARIES.get(target)
 
         if linux_bin is None and win_bin is None:
             registered = sorted(set(_WINDOWS_BINARIES) | set(_LINUX_BINARIES))
@@ -437,179 +540,202 @@ class Executor:
                 f"or add 'binary_windows'/'binary_linux' to config/{target}_format.json."
             )
 
-        afl = _afl_showmap() if use_qemu else None
+        use_frida = (
+            coverage_mode == "frida"
+            or (coverage_mode == "auto" and _IS_LINUX and linux_bin is not None and linux_bin.exists())
+        )
 
-        if _IS_LINUX and linux_bin is not None and linux_bin.exists():
-            self.binary  = linux_bin
+        if coverage_mode == "frida" and not (_IS_LINUX and linux_bin is not None and linux_bin.exists()):
+            raise RuntimeError(
+                f"coverage_mode='frida' requires a Linux binary for target '{target}' "
+                f"and a Linux host. Binary path: {linux_bin}"
+            )
+
+        if use_frida:
+            _load_frida()
+            self.binary = linux_bin
             self._fixed_args = list(_LINUX_ARGS.get(target, []))
             _ensure_executable(linux_bin)
             self.timeout = timeout_seconds or TIMEOUT_SECONDS_LINUX
-            if afl is not None:
-                self._mode        = "QEMU"
-                self._afl_showmap = afl
-            else:
-                self._mode        = "Linux"
-                self._afl_showmap = None
+            self._mode = "Frida"
         else:
-            if win_bin is None or not win_bin.exists():
-                raise FileNotFoundError(
-                    f"No binary found for target '{target}'. "
-                    f"Expected {win_bin} or {linux_bin}."
-                )
-            self.binary           = win_bin
-            self._fixed_args      = list(_WINDOWS_ARGS.get(target, []))
-            self.timeout          = timeout_seconds or TIMEOUT_SECONDS_WIN
-            self._mode            = "Windows"
-            self._afl_showmap     = None
+            if _IS_LINUX and linux_bin is not None and linux_bin.exists():
+                self.binary = linux_bin
+                self._fixed_args = list(_LINUX_ARGS.get(target, []))
+                _ensure_executable(linux_bin)
+                self.timeout = timeout_seconds or TIMEOUT_SECONDS_LINUX
+                self._mode = "Linux"
+            else:
+                if win_bin is None or not win_bin.exists():
+                    raise FileNotFoundError(
+                        f"No binary found for target '{target}'. Expected {win_bin} or {linux_bin}."
+                    )
+                self.binary = win_bin
+                self._fixed_args = list(_WINDOWS_ARGS.get(target, []))
+                self.timeout = timeout_seconds or TIMEOUT_SECONDS_WIN
+                self._mode = "Windows"
 
-        # If the registered binary is a Python script, prepend sys.executable
-        # so it runs correctly without needing a shebang or execute bit.
         if str(self.binary).endswith(".py"):
             self._fixed_args = [str(self.binary)] + self._fixed_args
             self.binary = Path(sys.executable)
 
-        # Input flag name — defaults to --ipstr, overridable per target
         self._input_arg = _INPUT_ARGS.get(target, "--ipstr")
-        # Input encoding — defaults to cli_escape, use "raw" for JSON direct
         self._input_encoding = _INPUT_ENCODINGS.get(target, "cli_escape")
 
     @property
     def mode(self) -> str:
-        """One of 'QEMU', 'Linux', or 'Windows'."""
         return self._mode
 
-    # ── Public run method ─────────────────────────────────────────────────────
-
     def run(self, input_data: bytes) -> tuple[bytes, bool, RunResult]:
-        """
-        Execute the parser with the given input.
-
-        Returns
-        -------
-        (behavior_bitmap, crashed, result)
-        """
         input_str = _cli_safe_input(input_data, self._input_encoding)
-
-        if self._mode == "QEMU":
-            return self._run_with_qemu(input_str)
-
+        if self._mode == "Frida":
+            return self._run_with_frida(input_str)
         result = self._run_binary(input_str)
         bitmap = _result_to_bitmap(result)
         return bitmap, result.is_crash, result
 
-    # ── QEMU mode ─────────────────────────────────────────────────────────────
+    def _run_with_frida(self, input_str: str) -> tuple[bytes, bool, RunResult]:
+        frida = _load_frida()
+        cmd = [str(self.binary), *self._fixed_args, f"{self._input_arg}={input_str}"]
+        edge_slots: list[int] = []
 
-    def _run_with_qemu(self, input_str: str) -> tuple[bytes, bool, RunResult]:
-        """
-        Run under ``afl-showmap -Q`` to obtain a real AFL++ edge-coverage bitmap.
+        def on_message(message: dict[str, Any], _data: bytes | None) -> None:
+            msg_type = message.get("type")
+            if msg_type != "send":
+                _frida_debug(f"script message type={msg_type}: {message}")
+                return
+            payload = message.get("payload") or {}
+            if payload.get("type") == "edges":
+                new_edges = [int(s) for s in payload.get("edges", [])]
+                edge_slots.extend(new_edges)
+                _frida_debug(
+                    f"received {len(new_edges)} edge slots (total={len(edge_slots)})"
+                )
+            elif payload.get("type") == "debug":
+                _frida_debug(f"agent debug: {payload}")
 
-        afl-showmap writes a raw BITMAP_SIZE-byte file to a temp path.
-        The target's stdout/stderr pass through for bug-type parsing.
-        """
-        bitmap_fd, bitmap_path = tempfile.mkstemp(suffix=".afl_bitmap")
-        os.close(bitmap_fd)
-
-        cmd = [
-            self._afl_showmap,
-            "-Q",                            # QEMU instrumentation — no source needed
-            "-b",                            # write raw binary bitmap (not ASCII tuples)
-            "-o", bitmap_path,
-            "-t", str(self.timeout * 1000),  # afl-showmap takes milliseconds
-            "-q",                            # suppress afl-showmap's own banner/progress
-            "--",
-            str(self.binary),
-            *self._fixed_args,
-            f"{self._input_arg}={input_str}",
-        ]
+        popen_kwargs: dict[str, Any] = {
+            "args": cmd,
+            "stdin": subprocess.DEVNULL,
+            "stdout": subprocess.PIPE,
+            "stderr": subprocess.PIPE,
+            "text": True,
+            "errors": "replace",
+            "cwd": self._cwd,
+        }
 
         try:
-            proc = subprocess.run(
-                cmd,
-                capture_output=True,
-                stdin=subprocess.DEVNULL,
-                text=True,
-                errors="replace",
-                timeout=self.timeout + 5,   # outer Python timeout > inner AFL timeout
-                cwd=self._cwd,
-            )
-            stdout = proc.stdout or ""
-            stderr = proc.stderr or ""
-
-            # Read the raw edge-coverage bitmap written by afl-showmap
-            try:
-                with open(bitmap_path, "rb") as f:
-                    raw = f.read()
-                # Normalise to exactly BITMAP_SIZE bytes
-                if len(raw) >= BITMAP_SIZE:
-                    bitmap = bytes(raw[:BITMAP_SIZE])
-                else:
-                    bitmap = raw + b"\x00" * (BITMAP_SIZE - len(raw))
-            except (FileNotFoundError, OSError):
-                # afl-showmap may not write the file if the binary crashed
-                # immediately — fall back to an empty bitmap
-                bitmap = bytes(BITMAP_SIZE)
-
-        except subprocess.TimeoutExpired:
-            result = RunResult(
-                input_str=input_str,
-                bug_type=BugType.TIMEOUT,
-                exit_code=None,
-                stdout="", stderr="",
-                exception_msg="Process timed out",
-            )
-            return _result_to_bitmap(result), True, result
-
+            proc = subprocess.Popen(**popen_kwargs)
+            _frida_debug(f"spawned pid={proc.pid} cmd={cmd!r}")
         except Exception as exc:
             result = RunResult(
                 input_str=input_str,
                 bug_type=BugType.CRASH,
                 exit_code=None,
-                stdout="", stderr="",
+                stdout="",
+                stderr="",
                 exception_msg=str(exc),
             )
-            return _result_to_bitmap(result), True, result
+            return bytes(BITMAP_SIZE), True, result
 
-        finally:
+        session = None
+        script = None
+        try:
+            session = frida.get_local_device().attach(proc.pid)
+            _frida_debug(f"attached to pid={proc.pid}")
+            script = session.create_script(_frida_agent_source(self.binary))
+            _frida_debug(f"created script for binary={self.binary}")
+            script.on("message", on_message)
+            script.load()
+            _frida_debug("script loaded")
+
             try:
-                os.unlink(bitmap_path)
-            except OSError:
-                pass
+                stdout, stderr = proc.communicate(timeout=self.timeout)
+                _frida_debug(
+                    f"process exited rc={proc.returncode} stdout_len={len(stdout or '')} "
+                    f"stderr_len={len(stderr or '')}"
+                )
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                try:
+                    stdout, stderr = proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    stdout, stderr = "", ""
+                _frida_debug(
+                    f"process timeout pid={proc.pid} partial_edges={len(edge_slots)}"
+                )
+                result = RunResult(
+                    input_str=input_str,
+                    bug_type=BugType.TIMEOUT,
+                    exit_code=None,
+                    stdout=stdout or "",
+                    stderr=stderr or "",
+                    exception_msg="Process timed out",
+                )
+                return _edge_slots_to_bitmap(edge_slots), True, result
 
-        exc_msg, tb = _parse_output(stdout, stderr)
-        if proc.returncode == 2:
-            # afl-showmap exit code 2 = internal timeout
+            if script is not None:
+                try:
+                    script.exports_sync.flush()
+                    _frida_debug(f"flush completed; total edge slots={len(edge_slots)}")
+                except Exception:
+                    _frida_debug("flush failed")
+                    pass
+
+            exc_msg, tb = _parse_output(stdout or "", stderr or "")
+            if proc.returncode not in (0, 1):
+                bug_type = BugType.CRASH
+                exc_msg = _summarize_process_failure(stdout or "", stderr or "", proc.returncode)
+            elif _traceback_exception_type(tb) == "PerformanceBug":
+                bug_type = BugType.PERFORMANCE
+            else:
+                bug_type = BugType.PASS
+
             result = RunResult(
                 input_str=input_str,
-                bug_type=BugType.TIMEOUT,
+                bug_type=bug_type,
                 exit_code=proc.returncode,
-                stdout=stdout,
-                stderr=stderr,
-                exception_msg="Process timed out (afl-showmap)",
+                stdout=stdout or "",
+                stderr=stderr or "",
+                exception_msg=exc_msg,
+                traceback=tb,
             )
-            return _result_to_bitmap(result), True, result
-        elif proc.returncode not in (0, 1):
-            bug_type = BugType.CRASH
-            exc_msg = _summarize_process_failure(stdout, stderr, proc.returncode)
-        else:
-            bug_type = BugType.PASS
+            parser_bug = _parser_reported_bug(result.stdout)
+            result.parser_reported_bug_type = parser_bug["kind"]
+            result.parser_reported_message = str(parser_bug["message"])
+            result.parser_reported_exc_type = str(parser_bug["exc_type"])
+            result.parser_reported_filename = str(parser_bug["filename"])
+            result.parser_reported_lineno = parser_bug["lineno"]
+            result = self._apply_oracle(result)
+            return _edge_slots_to_bitmap(edge_slots), result.is_crash, result
 
-        result = RunResult(
-            input_str=input_str,
-            bug_type=bug_type,
-            exit_code=proc.returncode,
-            stdout=stdout,
-            stderr=stderr,
-            exception_msg=exc_msg,
-            traceback=tb,
-        )
-        parser_bug_type, parser_bug_message = _parser_reported_bug(stdout)
-        result.parser_reported_bug_type = parser_bug_type
-        result.parser_reported_message = parser_bug_message
-        result = self._apply_oracle(result)
-        enriched_bitmap = _overlay_result_signal(bytearray(bitmap), result)
-        return enriched_bitmap, result.is_crash, result
-
-    # ── Shared binary runner (Linux-no-AFL and Windows) ───────────────────────
+        except Exception as exc:
+            _frida_debug(f"Frida execution failed: {exc!r}")
+            try:
+                proc.kill()
+                proc.communicate(timeout=5)
+            except Exception:
+                pass
+            result = RunResult(
+                input_str=input_str,
+                bug_type=BugType.CRASH,
+                exit_code=None,
+                stdout="",
+                stderr="",
+                exception_msg=str(exc),
+            )
+            return bytes(BITMAP_SIZE), True, result
+        finally:
+            if script is not None:
+                try:
+                    script.unload()
+                except Exception:
+                    pass
+            if session is not None:
+                try:
+                    session.detach()
+                except Exception:
+                    pass
 
     def _run_binary(self, input_str: str) -> RunResult:
         cmd = [str(self.binary), *self._fixed_args, f"{self._input_arg}={input_str}"]
@@ -628,7 +754,8 @@ class Executor:
                 input_str=input_str,
                 bug_type=BugType.TIMEOUT,
                 exit_code=None,
-                stdout="", stderr="",
+                stdout="",
+                stderr="",
                 exception_msg="Process timed out",
             )
         except Exception as exc:
@@ -636,7 +763,8 @@ class Executor:
                 input_str=input_str,
                 bug_type=BugType.CRASH,
                 exit_code=None,
-                stdout="", stderr="",
+                stdout="",
+                stderr="",
                 exception_msg=str(exc),
             )
 
@@ -661,9 +789,12 @@ class Executor:
             exception_msg=exc_msg,
             traceback=tb,
         )
-        parser_bug_type, parser_bug_message = _parser_reported_bug(stdout)
-        result.parser_reported_bug_type = parser_bug_type
-        result.parser_reported_message = parser_bug_message
+        parser_bug = _parser_reported_bug(stdout)
+        result.parser_reported_bug_type = parser_bug["kind"]
+        result.parser_reported_message = str(parser_bug["message"])
+        result.parser_reported_exc_type = str(parser_bug["exc_type"])
+        result.parser_reported_filename = str(parser_bug["filename"])
+        result.parser_reported_lineno = parser_bug["lineno"]
         return self._apply_oracle(result)
 
     def _apply_oracle(self, result: RunResult) -> RunResult:
@@ -672,108 +803,40 @@ class Executor:
         if result.bug_type in (BugType.CRASH, BugType.TIMEOUT):
             return result
 
-        # In QEMU mode afl-showmap does not forward the target's stdout/stderr,
-        # so result.traceback is always empty even when the parser raised a
-        # ParseException and exited with code 1.  Use exit_code == 1 as a
-        # supplementary rejection signal; afl-showmap does pass the target's
-        # exit code through unchanged.
+        parser_type = result.parser_reported_bug_type
+        if parser_type:
+            result.bug_type = str(parser_type)
+            result.exception_msg = (
+                result.parser_reported_message
+                or result.exception_msg
+                or f"Parser reported a {result.bug_type} bug"
+            )
+            return result
+
         observed_rejection = bool(result.traceback) or result.exit_code == 1
         exc_type = _traceback_exception_type(result.traceback)
         is_parse_rejection = exc_type.endswith("ParseException") or result.exit_code == 1
 
-        if result.parser_reported_bug_type == BugType.VALIDITY:
-            # Oracle cross-check: if the oracle knows this input is invalid,
-            # the parser is correctly rejecting it — not a validity bug.
-            if verdict.supported and verdict.expected_valid is False:
-                result.bug_type = BugType.INVALIDITY
-                detail = result.parser_reported_message or result.exception_msg or ""
-                result.exception_msg = detail
-                return result
-            result.bug_type = BugType.VALIDITY
-            detail = result.parser_reported_message or result.exception_msg or "Parser reported a validity bug"
-            result.exception_msg = f"{detail} [oracle={verdict.reason}]"
+        if result.bug_type == BugType.PERFORMANCE:
+            result.exception_msg = result.exception_msg or "PerformanceBug"
             return result
 
-        if result.parser_reported_bug_type == BugType.INVALIDITY:
-            # Oracle cross-check: if the oracle considers this input valid, the
-            # parser is wrongly rejecting it → reclassify as a ValidityBug.
-            if verdict.supported and verdict.expected_valid is True:
-                result.bug_type = BugType.VALIDITY
-                detail = (
-                    result.parser_reported_message
-                    or "Parser reported invalidity but oracle considers input valid"
-                )
-                result.exception_msg = f"{detail} [oracle={verdict.reason}]"
-                return result
+        if observed_rejection and is_parse_rejection:
             result.bug_type = BugType.INVALIDITY
-            detail = result.parser_reported_message or result.exception_msg or "Parser reported an invalidity bug"
-            result.exception_msg = detail
+            result.exception_msg = result.exception_msg or "Parser rejected input"
             return result
 
-        if result.parser_reported_bug_type == BugType.SYNTACTIC:
-            # Oracle cross-check: if the oracle considers this input valid, the
-            # parser is wrongly rejecting it with a syntactic error → reclassify
-            # as a ValidityBug.
-            if verdict.supported and verdict.expected_valid is True:
-                result.bug_type = BugType.VALIDITY
-                detail = (
-                    result.parser_reported_message
-                    or "Parser reported syntactic error but oracle considers input valid"
-                )
-                result.exception_msg = f"{detail} [oracle={verdict.reason}]"
-                return result
-            result.bug_type = BugType.SYNTACTIC
-            detail = result.parser_reported_message or result.exception_msg or "Parser reported a syntactic bug"
-            result.exception_msg = detail
+        if observed_rejection:
+            result.bug_type = BugType.BONUS
+            result.exception_msg = (
+                result.exception_msg
+                or f"Parser raised {exc_type or 'an unexpected exception'}"
+            )
             return result
 
-        if result.parser_reported_bug_type == BugType.RELIABILITY:
-            # Reliability bugs are real bugs regardless of oracle verdict —
-            # they indicate unexpected parser failure (e.g. unhandled exception,
-            # crash, or resource exhaustion).  Oracle context is appended but
-            # does not demote the classification.
-            result.bug_type = BugType.RELIABILITY
-            detail = result.parser_reported_message or result.exception_msg or "Parser reported a reliability bug"
-            result.exception_msg = f"{detail} [oracle={verdict.reason}]" if verdict.supported else detail
-            return result
-
-        if not verdict.supported:
-            if observed_rejection:
-                result.bug_type = BugType.ORACLE_UNKNOWN_REJECT
-                detail = result.exception_msg or "Parser rejected oracle-unsupported input"
-                result.exception_msg = f"{detail} [oracle={verdict.reason}]"
-            else:
-                result.bug_type = BugType.ORACLE_UNKNOWN_ACCEPT
-                result.exception_msg = f"Oracle unsupported for accepted input ({verdict.reason})"
-            return result
-
-        if verdict.expected_valid is True:
-            if observed_rejection:
-                result.bug_type = BugType.VALIDITY
-                detail = result.exception_msg or "Parser rejected oracle-valid input"
-                result.exception_msg = f"{detail} [oracle={verdict.reason}]"
-            else:
-                result.bug_type = BugType.PASS
-            return result
-
-        if verdict.expected_valid is False:
-            if not observed_rejection:
-                result.bug_type = BugType.ORACLE_MISMATCH
-                result.exception_msg = (
-                    "Oracle expected rejection, but parser accepted the input "
-                    f"({verdict.reason})"
-                )
-            elif is_parse_rejection:
-                result.bug_type = BugType.INVALIDITY
-            else:
-                result.bug_type = BugType.BONUS
-                detail = result.exception_msg or "Parser raised a non-ParseException"
-                result.exception_msg = f"{detail} [oracle={verdict.reason}]"
-            return result
-
+        result.bug_type = BugType.PASS
         return result
 
 
 def result_taxonomy_tags(result: RunResult) -> list[str]:
-    """Return user-facing taxonomy labels for a classified run result."""
     return _taxonomy_tags(result)

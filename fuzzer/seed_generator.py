@@ -25,6 +25,8 @@ import abc
 import random
 from pathlib import Path
 
+from fuzzer.bootstrap import load_seed_inputs
+
 _HERE = Path(__file__).parent.parent
 
 
@@ -51,13 +53,7 @@ class SeedGenerator(abc.ABC):
 
     def generate_corpus(self, n: int = 100) -> list[bytes]:
         """Return up to *n* seeds, loading from the seed file first if present."""
-        seeds: list[bytes] = []
-        seed_file = _HERE / "corpus" / f"{self._target_name()}_seeds.txt"
-        if seed_file.exists():
-            for line in seed_file.read_text().splitlines():
-                line = line.strip()
-                if line:
-                    seeds.append(line.encode())
+        seeds = load_seed_inputs(self._target_name(), allow_bootstrap=False)
         while len(seeds) < n:
             seeds.append(self.generate())
         return seeds[:n]
@@ -88,7 +84,7 @@ def get_seed_generator(format_name: str, fmt_config: dict | None = None) -> Seed
         f"(registered: {registered}) — using GenericSeedGenerator "
         f"with {len(examples)} example(s) from config."
     )
-    return GenericSeedGenerator(format_name, examples)
+    return GenericSeedGenerator(format_name, examples, fmt_config=fmt_config or {})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -102,8 +98,9 @@ class GenericSeedGenerator(SeedGenerator):
     always has something to mutate.
     """
 
-    def __init__(self, target_name: str, examples: list[str]) -> None:
+    def __init__(self, target_name: str, examples: list[str], fmt_config: dict | None = None) -> None:
         self._name = target_name
+        self._fmt_config = dict(fmt_config or {})
         self._examples: list[bytes] = [e.encode() for e in examples] or [b""]
 
     def _target_name(self) -> str:
@@ -113,13 +110,14 @@ class GenericSeedGenerator(SeedGenerator):
         return random.choice(self._examples)
 
     def generate_corpus(self, n: int = 100) -> list[bytes]:
-        seeds: list[bytes] = []
-        seed_file = _HERE / "corpus" / f"{self._name}_seeds.txt"
-        if seed_file.exists():
-            for line in seed_file.read_text().splitlines():
-                line = line.strip()
-                if line:
-                    seeds.append(line.encode())
+        seeds = load_seed_inputs(
+            self._name,
+            {
+                **self._fmt_config,
+                "valid_examples": [e.decode("utf-8", errors="replace") for e in self._examples],
+            },
+            allow_bootstrap=True,
+        )
         while len(seeds) < n:
             seeds.append(self.generate())
         return seeds[:n]

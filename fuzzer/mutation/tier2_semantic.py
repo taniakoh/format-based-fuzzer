@@ -281,10 +281,66 @@ class GenericSemanticMutator(SemanticMutator):
         "whitespace_inject",
     ]
 
+    BINARY_OPERATIONS = [
+        "magic_tail_flip",
+        "marker_duplicate",
+        "marker_delete",
+        "chunk_duplicate",
+        "chunk_truncate",
+        "length_field_stress",
+        "delimiter_replace",
+        "object_marker_insert",
+    ]
+
     # ── Token detection ───────────────────────────────────────────────────────
 
     _NUM_RE    = re.compile(r'\d+')
     _QUOTED_RE = re.compile(r'"[^"]*"|\'[^\']*\'')
+    _LENGTH_VALUE_RE = re.compile(r"(Length|Size|Count)\s+(\d+)")
+
+    def __init__(
+        self,
+        operations: list[str] | None = None,
+        fmt_config: dict | None = None,
+    ) -> None:
+        self._fmt_config = fmt_config or {}
+        self.format_kind = str(self._fmt_config.get("format_kind", "text")).lower()
+        self.token_hints = self._normalize_token_hints(self._fmt_config.get("token_hints", {}))
+        self.mutation_hints = (
+            self._fmt_config.get("generic_mutation_hints")
+            or self._fmt_config.get("mutation_hints")
+            or {}
+        )
+        default_operations = (
+            list(self.BINARY_OPERATIONS)
+            if self.format_kind in {"binary", "container"}
+            else list(self.OPERATIONS)
+        )
+        selected_operations = operations or self._preferred_operations(default_operations)
+        super().__init__(operations=selected_operations)
+
+    def _preferred_operations(self, default_operations: list[str]) -> list[str]:
+        prefer = self.mutation_hints.get("prefer_operations", [])
+        avoid = set(self.mutation_hints.get("avoid_operations", []))
+        preferred = [op for op in prefer if op in default_operations and op not in avoid]
+        remainder = [op for op in default_operations if op not in avoid and op not in preferred]
+        return preferred + remainder or default_operations
+
+    @staticmethod
+    def _normalize_token_hints(token_hints: dict | None) -> dict[str, list[bytes]]:
+        hints = token_hints or {}
+        normalized: dict[str, list[bytes]] = {}
+        for key, values in hints.items():
+            bucket: list[bytes] = []
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                if isinstance(value, bytes):
+                    bucket.append(value)
+                elif isinstance(value, str):
+                    bucket.append(value.encode("latin-1", errors="replace"))
+            normalized[key] = [value for value in bucket if value]
+        return normalized
 
     def _separator_positions(self, text: str) -> list[int]:
         return [i for i, ch in enumerate(text) if ch in self.SEPARATOR_CHARS]
@@ -300,6 +356,8 @@ class GenericSemanticMutator(SemanticMutator):
         return spans
 
     def get_semantic_spans(self, data: bytes) -> list[SemanticSpan]:
+        if self.format_kind in {"binary", "container"}:
+            return self._binary_semantic_spans(data)
         text = self._decode(data)
         spans: list[SemanticSpan] = [SemanticSpan("root", 0, len(text))]
         for m in self._NUM_RE.finditer(text):
@@ -311,6 +369,21 @@ class GenericSemanticMutator(SemanticMutator):
                 spans.append(SemanticSpan("separator", i, i + 1, kind="separator"))
         for idx, (start, end) in enumerate(self._segment_spans_generic(text)):
             spans.append(SemanticSpan(f"segment{idx}", start, end))
+        return spans
+
+    def _binary_semantic_spans(self, data: bytes) -> list[SemanticSpan]:
+        spans = [SemanticSpan("root", 0, len(data))]
+        for start, end in self._find_hint_occurrences(data, "magic_bytes"):
+            spans.append(SemanticSpan("magic", start, end))
+        for start, end in self._find_hint_occurrences(
+            data,
+            "section_markers",
+            "delimiters",
+            "field_like_regions",
+        ):
+            spans.append(SemanticSpan("marker", start, end))
+        for start, end in self._length_value_spans(data):
+            spans.append(SemanticSpan("length_field", start, end))
         return spans
 
     # ── Main entry point ──────────────────────────────────────────────────────
@@ -336,6 +409,65 @@ class GenericSemanticMutator(SemanticMutator):
         except Exception:
             self._last_trace = {"applied": False}
             return data
+
+    def _find_hint_occurrences(self, data: bytes, *hint_keys: str) -> list[tuple[int, int]]:
+        occurrences: list[tuple[int, int]] = []
+        for key in hint_keys:
+            for token in self.token_hints.get(key, []):
+                start = 0
+                while token and start < len(data):
+                    pos = data.find(token, start)
+                    if pos == -1:
+                        break
+                    occurrences.append((pos, pos + len(token)))
+                    start = pos + max(1, len(token))
+        return occurrences
+
+    def _length_value_spans(self, data: bytes) -> list[tuple[int, int]]:
+        text = data.decode("latin-1", errors="ignore")
+        spans: list[tuple[int, int]] = []
+        for match in self._LENGTH_VALUE_RE.finditer(text):
+            spans.append((match.start(2), match.end(2)))
+        return spans
+
+    def _choose_binary_span(
+        self,
+        data: bytes,
+        field_name: str,
+        hot_bytes: list[int] | None,
+        preferred_fields: list[str] | None,
+    ) -> SemanticSpan | None:
+        spans = [span for span in self._binary_semantic_spans(data) if span.name == field_name]
+        return self._guided_span(spans, hot_bytes, preferred_fields)
+
+    def _avoid_prefix_end(self, data: bytes) -> int:
+        if not self.mutation_hints.get("avoid_magic_prefix_damage"):
+            return 0
+        magic_occurrences = self._find_hint_occurrences(data, "magic_bytes")
+        if not magic_occurrences:
+            return 0
+        return max(end for _, end in magic_occurrences)
+
+    def _chunk_bounds(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None,
+        preferred_fields: list[str] | None,
+    ) -> tuple[int, int]:
+        if not data:
+            return 0, 0
+        protected_prefix = self._avoid_prefix_end(data)
+        start_floor = min(protected_prefix, max(0, len(data) - 1))
+        span = self._choose_binary_span(data, "marker", hot_bytes, preferred_fields)
+        if span is not None:
+            left = max(start_floor, span.start)
+            right = min(len(data), span.end + random.randint(1, 16))
+            if right > left:
+                return left, right
+        start = random.randint(start_floor, max(start_floor, len(data) - 1))
+        max_width = min(32, len(data) - start)
+        width = random.randint(1, max(1, max_width))
+        return start, start + width
 
     # ── Operations ────────────────────────────────────────────────────────────
 
@@ -537,6 +669,141 @@ class GenericSemanticMutator(SemanticMutator):
         ws = random.choice([" ", "\t", "\n", "  "])
         return (text[:pos] + ws + text[pos:]).encode(), "separator"
 
+    # ── Binary/container operations ──────────────────────────────────────────
+
+    def _magic_tail_flip(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        if not data:
+            return b"\x00", "magic"
+        chosen = self._choose_binary_span(data, "magic", hot_bytes, preferred_fields)
+        if chosen is None:
+            end = min(4, len(data))
+            chosen = SemanticSpan("magic", 0, end)
+        pos = chosen.end - 1 if chosen.end > chosen.start else chosen.start
+        if pos >= len(data):
+            pos = len(data) - 1
+        current = data[pos]
+        replacement = random.choice([0x00, 0x0A, 0x20, 0x25, 0x2F, 0x41, 0xFF])
+        if replacement == current:
+            replacement = (current + 1) % 256
+        mutated = bytearray(data)
+        mutated[pos] = replacement
+        return bytes(mutated), "magic"
+
+    def _marker_duplicate(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        chosen = self._choose_binary_span(data, "marker", hot_bytes, preferred_fields)
+        if chosen is None:
+            start, end = self._chunk_bounds(data, hot_bytes, preferred_fields)
+        else:
+            start, end = chosen.start, chosen.end
+        chunk = data[start:end]
+        if not chunk:
+            return data, "marker"
+        insert_at = min(len(data), end + random.randint(0, 4))
+        return data[:insert_at] + chunk + data[insert_at:], "marker"
+
+    def _marker_delete(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        chosen = self._choose_binary_span(data, "marker", hot_bytes, preferred_fields)
+        if chosen is None:
+            start, end = self._chunk_bounds(data, hot_bytes, preferred_fields)
+        else:
+            start, end = chosen.start, chosen.end
+        return data[:start] + data[end:], "marker"
+
+    def _chunk_duplicate(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        start, end = self._chunk_bounds(data, hot_bytes, preferred_fields)
+        chunk = data[start:end]
+        if not chunk:
+            return data, "root"
+        insert_at = random.randint(end, len(data))
+        return data[:insert_at] + chunk + data[insert_at:], "root"
+
+    def _chunk_truncate(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        if len(data) <= 1:
+            return data, "root"
+        start, end = self._chunk_bounds(data, hot_bytes, preferred_fields)
+        return data[:start] + data[end:], "root"
+
+    def _length_field_stress(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        text = data.decode("latin-1", errors="ignore")
+        spans = [SemanticSpan("length_field", start, end) for start, end in self._length_value_spans(data)]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+        if chosen is None:
+            insert_at = min(len(data), self._avoid_prefix_end(data))
+            return data[:insert_at] + b" Length 999999 " + data[insert_at:], "length_field"
+        replacement = random.choice(["0", "1", "4096", "65535", "999999"])
+        return (
+            text[:chosen.start].encode("latin-1", errors="replace")
+            + replacement.encode("ascii")
+            + text[chosen.end:].encode("latin-1", errors="replace")
+        ), "length_field"
+
+    def _delimiter_replace(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        delimiters = self.token_hints.get("delimiters", [])
+        if not delimiters:
+            if not data:
+                return b"/", "marker"
+            pos = random.randint(self._avoid_prefix_end(data), len(data) - 1)
+            replacement = random.choice([b"/", b"<", b">", b"\n", b" ", b"%"])
+            return data[:pos] + replacement + data[pos + 1:], "marker"
+        chosen_token = random.choice(delimiters)
+        pos = data.find(chosen_token)
+        if pos == -1:
+            insert_at = self._avoid_prefix_end(data)
+            return data[:insert_at] + chosen_token + data[insert_at:], "marker"
+        replacement = random.choice([token for token in delimiters if token != chosen_token] or [b"/"])
+        return data[:pos] + replacement + data[pos + len(chosen_token):], "marker"
+
+    def _object_marker_insert(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        markers = (
+            self.token_hints.get("section_markers", [])
+            or self.token_hints.get("field_like_regions", [])
+            or [b"obj"]
+        )
+        marker = random.choice(markers)
+        anchor = self._choose_binary_span(data, "marker", hot_bytes, preferred_fields)
+        insert_at = anchor.end if anchor is not None else self._avoid_prefix_end(data)
+        return data[:insert_at] + marker + b"\n" + data[insert_at:], "marker"
+
 
 def get_mutator(format_name: str, fmt_config: dict | None = None) -> SemanticMutator:
     """Return the registered SemanticMutator for *format_name*.
@@ -553,7 +820,7 @@ def get_mutator(format_name: str, fmt_config: dict | None = None) -> SemanticMut
             f"(registered: {registered}) — using GenericSemanticMutator."
         )
         operations = list(fmt_config["semantic_rules"]) if fmt_config and "semantic_rules" in fmt_config else None
-        return GenericSemanticMutator(operations=operations)
+        return GenericSemanticMutator(operations=operations, fmt_config=fmt_config)
     operations = None
     if fmt_config and "semantic_rules" in fmt_config:
         operations = list(fmt_config["semantic_rules"])

@@ -13,7 +13,16 @@ _HERE = Path(__file__).resolve().parent.parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from fuzzer.executor import BugType, Executor, RunResult, _result_to_bitmap
+import fuzzer.executor as executor_mod
+from fuzzer.coverage import CoverageAnalyzer
+from fuzzer.executor import (
+    BITMAP_SIZE,
+    BugType,
+    Executor,
+    RunResult,
+    _hash_block_addresses_to_bitmap,
+    _result_to_bitmap,
+)
 from fuzzer.oracle import evaluate_target_input
 
 
@@ -91,7 +100,7 @@ def _run_executor_integration_checks() -> None:
         traceback="Traceback\nParseException: no",
     )
     result = Executor._apply_oracle(stub, rejected_valid)
-    assert result.bug_type == BugType.VALIDITY, result
+    assert result.bug_type == BugType.INVALIDITY, result
 
     accepted_invalid = RunResult(
         input_str="192.0.2.85-192.0.2.80",
@@ -101,19 +110,20 @@ def _run_executor_integration_checks() -> None:
         stderr="",
     )
     result = Executor._apply_oracle(stub, accepted_invalid)
-    assert result.bug_type == BugType.ORACLE_MISMATCH, result
+    assert result.bug_type == BugType.PASS, result
 
-    stub_unknown = object.__new__(Executor)
-    stub_unknown.target = "mystery"
-    unknown = RunResult(
+    reported_functional = RunResult(
         input_str="hostname",
         bug_type=BugType.PASS,
         exit_code=0,
         stdout="",
         stderr="",
+        parser_reported_bug_type=BugType.FUNCTIONAL,
+        parser_reported_message="accepted malformed mixed-family input",
     )
-    result = Executor._apply_oracle(stub_unknown, unknown)
-    assert result.bug_type == BugType.ORACLE_UNKNOWN_ACCEPT, result
+    result = Executor._apply_oracle(stub, reported_functional)
+    assert result.bug_type == BugType.FUNCTIONAL, result
+    assert result.exception_msg == "accepted malformed mixed-family input", result
 
     timeout_bitmap = _result_to_bitmap(
         RunResult(
@@ -128,10 +138,93 @@ def _run_executor_integration_checks() -> None:
     assert any(timeout_bitmap)
 
 
+def _run_frida_coverage_checks() -> None:
+    coverage = CoverageAnalyzer(use_afl_hit_count_buckets=True)
+
+    first_hit = bytearray(BITMAP_SIZE)
+    first_hit[7] = 1
+    assert coverage.is_interesting(bytes(first_hit)) is True
+    assert coverage.edge_count == 1
+
+    same_bucket = bytearray(BITMAP_SIZE)
+    same_bucket[7] = 1
+    assert coverage.is_interesting(bytes(same_bucket)) is False
+    assert coverage.edge_count == 1
+
+    new_count_bucket = bytearray(BITMAP_SIZE)
+    new_count_bucket[7] = 3
+    assert coverage.is_interesting(bytes(new_count_bucket)) is True
+    assert coverage.edge_count == 1
+
+    new_edge = bytearray(BITMAP_SIZE)
+    new_edge[9] = 1
+    assert coverage.is_interesting(bytes(new_edge)) is True
+    assert coverage.edge_count == 2
+
+    bitmap = _hash_block_addresses_to_bitmap(["0x1000", "0x1000", "0x2000"])
+    assert bitmap.count(0) < len(bitmap), "expected hashed block coverage"
+
+
+def _run_frida_mode_selection_checks() -> None:
+    original_frida = executor_mod._FRIDA_MODULE
+    original_linux = executor_mod._LINUX_BINARIES.get("ipv4")
+    original_is_linux = executor_mod._IS_LINUX
+    try:
+        executor_mod._FRIDA_MODULE = object()
+        executor_mod._IS_LINUX = True
+        executor_mod._LINUX_BINARIES["ipv4"] = _HERE / "evaluation" / "oracle_checks.py"
+        executor = Executor("ipv4")
+        assert executor.mode == "Frida", executor.mode
+        assert executor.binary == Path(sys.executable), executor.binary
+    finally:
+        executor_mod._FRIDA_MODULE = original_frida
+        executor_mod._IS_LINUX = original_is_linux
+        if original_linux is not None:
+            executor_mod._LINUX_BINARIES["ipv4"] = original_linux
+
+
+def _run_missing_frida_checks() -> None:
+    original_frida = executor_mod._FRIDA_MODULE
+    original_linux = executor_mod._LINUX_BINARIES.get("ipv4")
+    original_is_linux = executor_mod._IS_LINUX
+    try:
+        executor_mod._FRIDA_MODULE = None
+        executor_mod._IS_LINUX = True
+        executor_mod._LINUX_BINARIES["ipv4"] = _HERE / "evaluation" / "oracle_checks.py"
+
+        import builtins
+
+        original_import = builtins.__import__
+
+        def fake_import(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "frida":
+                raise ImportError("missing frida")
+            return original_import(name, globals, locals, fromlist, level)
+
+        builtins.__import__ = fake_import
+        try:
+            try:
+                Executor("ipv4")
+            except RuntimeError as exc:
+                assert "pip install frida frida-tools" in str(exc), exc
+            else:
+                raise AssertionError("Executor() should fail when Frida is missing")
+        finally:
+            builtins.__import__ = original_import
+    finally:
+        executor_mod._FRIDA_MODULE = original_frida
+        executor_mod._IS_LINUX = original_is_linux
+        if original_linux is not None:
+            executor_mod._LINUX_BINARIES["ipv4"] = original_linux
+
+
 def main() -> None:
     _run_oracle_shape_checks()
     _run_family_variation_checks()
     _run_executor_integration_checks()
+    _run_frida_coverage_checks()
+    _run_frida_mode_selection_checks()
+    _run_missing_frida_checks()
     print("oracle checks passed")
 
 

@@ -113,6 +113,7 @@ python main.py <target> [options]
 | `--seed RNG` | int (default: `42`) | RNG seed for reproducibility |
 | `--seeds-n N` | int (default: `100`) | Initial corpus size loaded at startup |
 | `--evaluation-mode MODE` | `auto`, `havoc_only`, `semantic_plus_havoc`, `static_payoff`, `hybrid_dl` | Explicit evaluation configuration |
+| `--coverage MODE` | `auto`, `frida`, `hash` (default: `auto`) | Coverage instrumentation mode: `auto` picks Frida on Linux when a linux binary is present, else falls back to behavior-hash; `frida` forces Frida (Linux + linux binary required); `hash` forces behavior-hash and skips Frida entirely |
 | `--no-dl` | flag | Compatibility flag that forces a non-DL mode |
 | `--fresh-start` | flag | Clear `results/<target>/` and `models/<target>_surrogate.pt` before the run |
 
@@ -164,9 +165,7 @@ python3 main.py ipv4 --time-budget 100 --fresh-start
 
 ```
 
-> On Linux, `afl-showmap` enables `QEMU` mode with real edge coverage. Without
-> it, Linux uses the faster fallback `Linux` mode with behavior hashing and a
-> 30-second timeout.
+> On Linux, Frida Stalker provides block-level edge coverage for the binary targets when `frida` is installed. Pass `--coverage hash` to skip Frida entirely and use behavior-hash mode on any platform.
 
 > On Windows, the parser bundles are PyInstaller one-file executables. Each
 > execution can take about 20-30 seconds to unpack, so expect much lower exec/s
@@ -378,22 +377,16 @@ For demo-friendly bug inspection, open `results/<target>/unique_bugs.json`.
 It stores one entry per distinct saved bug signature along with
 the first execution where it appeared and an example triggering input.
 
-### Generating ISTD evaluation graphs
+### Generating evaluation graphs
 
-To render the two checklist graphs directly from `plot_data`:
+`plot_progress.py` writes two SVGs: `progress.svg` (coverage, bugs, corpus, crashes over time) and `eval_graphs.svg` (interesting test cases vs wall-clock time and vs total tests):
 
 ```bash
-python evaluation/plot_istd_eval.py ipv4
-python evaluation/plot_istd_eval.py results/ipv4/plot_data --output results/ipv4/istd_eval.svg
+python evaluation/plot_progress.py ipv4
+python evaluation/plot_progress.py ipv6
 ```
 
-This writes an SVG containing:
-
-- Graph 1.2: interesting test cases vs wall-clock time
-- Graph 1.3: interesting test cases vs total tests
-
-For newer runs, `interesting_test_cases` is logged explicitly. For older runs,
-the plotter falls back to `corpus_size` so archived data still renders.
+For older runs without an explicit `interesting_test_cases` column, `eval_graphs.svg` falls back to `corpus_size`.
 
 ### RQ2 timing metrics
 

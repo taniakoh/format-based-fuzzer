@@ -1,5 +1,6 @@
 {
   "format": "IPv4",
+  "instrumentation": "frida",
   "binary_linux": "/home/tanta/linux-ipv4-parser",
   "fields": ["octet1", "octet2", "octet3", "octet4"],
   "valid_examples": [

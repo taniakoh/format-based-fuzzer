@@ -1,5 +1,6 @@
 {
   "format": "IPv6",
+  "instrumentation": "frida",
   "binary_linux": "/home/tanta/linux-ipv6-parser",
   "fields": ["group1", "group2", "group3", "group4", "group5", "group6", "group7", "group8"],
   "valid_examples": [

@@ -1,5 +1,6 @@
 {
   "format": "cjson",
+  "instrumentation": "frida",
   "binary_linux": "cjson/cjson_driver_asan",
   "binary_input_arg": "--ipstr",
   "binary_input_encoding": "raw",

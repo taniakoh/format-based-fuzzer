@@ -81,8 +81,7 @@ try:
         x = torch.tensor([_normalize_seed(seed, max_len)], dtype=torch.long, device=device)
 
         embed = model.embed(x).float()
-        embed.retain_grad()
-        embed.requires_grad_(True)
+        embed.retain_grad()  # sufficient for non-leaf gradient capture; requires_grad_ would error
 
         flat = embed.view(1, -1)
         h = model.encoder(flat)

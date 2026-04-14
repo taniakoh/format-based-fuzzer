@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from fuzzer.bootstrap import enrich_format_config
+
 _HERE = Path(__file__).parent.parent  # project root
 
 
@@ -13,5 +15,5 @@ def load_format(name: str) -> dict:
     path = _HERE / "config" / f"{name.lower()}_format.json"
     if not path.exists():
         print(f"[format_loader] No config found for '{name}' ({path}) — using empty config.")
-        return {}
-    return json.loads(path.read_text())
+        return enrich_format_config(name, {})
+    return enrich_format_config(name, json.loads(path.read_text(encoding="utf-8")))

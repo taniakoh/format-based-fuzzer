@@ -76,6 +76,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from fuzzer.format_loader import load_format
+from fuzzer.bootstrap import load_seed_inputs
 from fuzzer.mutation.tier2_semantic import get_mutator
 from fuzzer.mutation.tier3_havoc import HavocMutator
 
@@ -98,7 +99,7 @@ BASE_WEIGHTS = FMT.get(
         "interesting_byte": 0.15,
     },
 )
-SEED_BYTES = [example.encode("utf-8") for example in FMT.get("valid_examples", [])] or [b"{}"]
+SEED_BYTES = load_seed_inputs("json", FMT, allow_bootstrap=True) or [b"{}"]
 
 # DL weights file path (set by main.py via env var when DL is enabled)
 _DL_WEIGHTS_PATH = os.environ.get("ATHERIS_DL_WEIGHTS")

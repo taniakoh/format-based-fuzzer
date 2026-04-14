@@ -78,6 +78,22 @@ Improvements:
 
 Reasons:
 - Corrected a misleading metric in `stats.txt` and `plot_data` that made repeated crashes look like steady discovery progress.
+
+## 2026-04-14
+
+### Count unique bugs by source line instead of message text
+Improvements:
+- Redefined the primary unique-bug metric around canonical bug sites derived from traceback frames, parser-reported filenames and line numbers, and normalized fallback fields.
+- Updated `unique_bugs.json`, `bug_coverage_summary.json`, `stats.txt`, and `bugs.jsonl` to carry explicit dedup metadata such as exception class, filename, line number, fault location, and dedup source.
+- Changed `logs/bug_counts.csv` aggregation to group findings by bug type, exception class, filename, and line number, while treating exception message as descriptive context only.
+
+Reasons:
+- Prevents the same exception class from being merged across different source lines and avoids overcounting message-only variations from the same bug site.
+- Makes native runs and Atheris post-processing report unique bugs using the same line-based definition.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
+- `main.py`
 - Kept post-run charts and summaries honest when a campaign gets stuck repeating the same crash.
 
 Key files changed:
@@ -174,13 +190,77 @@ Key files changed:
 ### Align coverage wording and bug-site deduplication
 Improvements:
 - Changed user-facing metrics and plots to report `coverage` / `coverage_seen` instead of `behavior` / `behaviors_seen`.
-- Updated unique bug signatures to include the recovered traceback bug site so the same bug family can still count separately when different code locations are hit.
+- Reworked unique bug counting to deduplicate explicit parser-raised bug sites using the parser-reported bug kind, exception class, filename, line number, and parser-reported message.
+- Added parser bug-site metadata to saved findings and a `unique_real` breakdown in the coverage summary so parser-site counts are visible in machine-readable outputs.
 
 Reasons:
 - The previous wording suggested a softer behavior proxy even in places where the metric is used and presented as the run's main coverage signal.
-- The previous deduplication could merge bug hits from different code sites if the broader failure signature matched, which did not reflect the intended slide/report interpretation.
+- The previous unique bug metric counted broader failure signatures and oracle mismatches, which did not match the intended interpretation of "actual parser bug raises".
 
 Key files changed:
+- `fuzzer/executor.py`
 - `evaluation/collect_metrics.py`
 - `evaluation/plot_progress.py`
 - `main.py`
+
+## 2026-04-09
+
+### Use pure AFL-style novelty in QEMU mode
+Improvements:
+- Removed the extra bug/outcome signal overlay from the QEMU executor path so `afl-showmap -Q` coverage is now consumed directly.
+- Switched QEMU novelty tracking to an AFL-style virgin bitmap with hit-count bucketing, while keeping the existing behavior-hash fallback for non-QEMU modes.
+- Added a regression check covering repeated hits, repeated buckets, and new hit-count buckets on the same edge.
+
+Reasons:
+- The previous QEMU path mixed real edge coverage with synthetic bug-result bits, which made "new behavior" broader than the raw AFL/QEMU signal.
+- Using the virgin-bitmap method keeps QEMU runs aligned with the intended AFL-style notion of new coverage.
+
+Key files changed:
+- `fuzzer/executor.py`
+- `fuzzer/coverage.py`
+- `main.py`
+- `evaluation/oracle_checks.py`
+- `codefix.md`
+
+## 2026-04-09
+
+### Make parser output and exceptions the classification source of truth
+Improvements:
+- Changed executor classification so parser-reported bug kinds and observable exception outcomes determine `bug_type`, while oracle data is kept only as attached metadata.
+- Stopped counting binary-target `functional` findings under the old `oracle_mismatch` label and updated stats output to report `Functional bugs` instead.
+- Updated regression checks so terminal labels and saved artifacts now follow the same parser/exception-based classification path.
+
+Reasons:
+- The previous flow could relabel results based on oracle interpretation, which made terminal output and saved bug labels drift away from what the parser or traceback actually reported.
+- Keeping classification grounded in parser output and runtime evidence makes the bitmap, logs, and unique-bug accounting easier to reason about.
+
+Key files changed:
+- `fuzzer/executor.py`
+- `evaluation/collect_metrics.py`
+- `evaluation/oracle_checks.py`
+- `codefix.md`
+
+## 2026-04-14
+
+### Add opt-in Frida executor diagnostics
+Improvements:
+- Added `FRIDA_DEBUG_FUZZER=1` tracing around the Linux Frida executor path so attach, script load, non-`send` script messages, and final edge-slot counts are visible during debugging.
+- Surfaced otherwise-silent Frida script errors in the executor's message handler to make Stalker and agent failures easier to distinguish from empty coverage.
+- Moved the temporary process stop from `preexec_fn` to a parent-side `SIGSTOP` immediately after spawn so the first Frida execution no longer wedges inside `subprocess.Popen(...)`.
+- Updated the embedded Frida agent to use the current `Process.enumerateModules()` and `Process.enumerateThreads()` APIs instead of removed `...Sync()` variants.
+- Added Frida agent debug messages for target-module selection, thread enumeration, and thread-follow attempts so zero-coverage runs can be narrowed down without guessing.
+- Fixed Linux `--coverage hash` runs to use the Linux binary instead of falling back to the Windows PyInstaller executable.
+- Removed the parent-side `SIGSTOP`/`SIGCONT` around Frida attach after debugging showed the stopped process exposed zero threads to the agent and led to timeouts with no coverage.
+
+Reasons:
+- `Executor mode : Frida` only confirms mode selection, not that attach, script injection, or edge collection actually succeeded.
+- The previous message handler dropped non-`send` messages, hiding useful Frida error output during instrumentation failures.
+- Stopping the child in `preexec_fn` can block `Popen` before the parent regains control, which makes the first execution look stuck before any Frida debug output appears.
+- Frida 17 rejected the agent at load time with `TypeError: not a function`, which prevented Stalker from starting and left coverage empty.
+- The remaining zero-edge timeout needed more visibility into which module and threads the agent was actually following.
+- On WSL, forcing `hash` should still keep execution on the native Linux binary so performance comparisons are meaningful.
+- The extra diagnostics showed that attaching while the child was stopped yielded `threadCount: 0`, so the agent had no threads to follow and never produced Stalker events.
+
+Key files changed:
+- `fuzzer/executor.py`
+- `codefix.md`

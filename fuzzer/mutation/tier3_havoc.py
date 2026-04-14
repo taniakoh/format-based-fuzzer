@@ -35,6 +35,7 @@ class HavocMutator:
         preferred_indices: list[int] | None = None,
         field_lookup: dict[int, str] | None = None,
         guided_ratio: float = 0.7,
+        splice_seed: bytes | None = None,
     ) -> bytes:
         buf = bytearray(data)
         trace = {
@@ -51,6 +52,7 @@ class HavocMutator:
                 hot_bytes=hot_bytes,
                 preferred_indices=preferred_indices,
                 guided_ratio=guided_ratio,
+                splice_seed=splice_seed,
             )
             trace["operators"].append(op)
             if used_guidance:
@@ -83,6 +85,9 @@ class HavocMutator:
 
         return random.randint(0, buf_len - 1), False
 
+    _ARITHMETIC_DELTAS = [-35, -16, -4, -1, 1, 4, 16, 35]
+    _INTERESTING_BYTES = [0x00, 0x01, 0x10, 0x20, 0x2E, 0x3A, 0x40, 0x64, 0x7E, 0x7F, 0x80, 0x81, 0xFF]
+
     def _apply(
         self,
         buf: bytearray,
@@ -90,6 +95,7 @@ class HavocMutator:
         hot_bytes: list[int] | None = None,
         preferred_indices: list[int] | None = None,
         guided_ratio: float = 0.7,
+        splice_seed: bytes | None = None,
     ) -> tuple[bytearray, int, bool]:
         if not buf:
             return buf, 0, False
@@ -106,9 +112,15 @@ class HavocMutator:
             case "byte_substitute":
                 buf[idx] = random.randint(0, 255)
             case "arithmetic":
-                buf[idx] = (buf[idx] + random.choice([-35, -1, 1, 35])) & 0xFF
+                buf[idx] = (buf[idx] + random.choice(self._ARITHMETIC_DELTAS)) & 0xFF
             case "splice":
-                if len(buf) > 4:
+                # True cross-seed splice: take a suffix from a second corpus entry
+                # and graft it onto a prefix of the current buffer at idx.
+                if splice_seed and len(splice_seed) > 2:
+                    cross = random.randint(1, len(splice_seed) - 1)
+                    buf = buf[:idx] + bytearray(splice_seed[cross:])
+                elif len(buf) > 4:
+                    # Fallback: circular rotation when no second seed is available
                     mid = max(1, min(len(buf) - 1, idx))
                     buf = buf[mid:] + buf[:mid]
             case "delete_range":
@@ -118,6 +130,6 @@ class HavocMutator:
                 ins = bytes(random.randint(0, 255) for _ in range(random.randint(1, 8)))
                 buf[idx:idx] = ins
             case "interesting_byte":
-                buf[idx] = random.choice([0x00, 0x01, 0x2E, 0x3A, 0x7F, 0x80, 0xFF])
+                buf[idx] = random.choice(self._INTERESTING_BYTES)
 
         return buf, idx, used_guidance

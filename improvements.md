@@ -2,6 +2,76 @@
 
 Use this file to record meaningful improvements, refactors, feature additions, performance work, and reliability upgrades.
 
+## 2026-04-14
+
+### Unify bug metrics around canonical bug sites
+Improvements:
+- Added shared bug-site derivation logic so traceback-bearing crashes, parser-reported bug sites, and fallback bug records all normalize to the same unique-bug identity.
+- Extended run artifacts to expose dedup metadata directly in `unique_bugs.json`, `bugs.jsonl`, and summary outputs.
+- Brought Atheris post-processing in line with the native metrics collector so both pipelines emit comparable unique-bug totals and line-based `bug_counts.csv` rows.
+
+Reasons:
+- The previous outputs mixed parser-site, traceback, and message-based notions of uniqueness, which made cross-run comparisons noisy.
+- Shared normalization makes downstream plots, CSV analysis, and manual auditing much more trustworthy.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
+- `main.py`
+- `improvements.md`
+
+## 2026-04-09
+
+### Added WSL source-instrumentation path for IP parsers
+Improvements:
+- Added `tools/ip_parser_source_runner.py` to run the extracted IPv4/IPv6 parser modules directly from the PyInstaller payload in WSL/Linux.
+- Added `tools/ip_parser_afl_harness.py`, a low-overhead persistent `python-afl` harness that keeps the parser loaded and fuzzes via stdin.
+- Added `instrumentation.md` with concrete `coverage.py` and `python-afl` examples for source-level instrumentation.
+
+Reasons:
+- The packaged Windows parser binaries are slow to launch and hard to instrument directly.
+- The extracted Linux payload already contains importable parser modules, so using them directly is a much cleaner path to real runtime coverage.
+
+Key files changed:
+- `tools/ip_parser_source_runner.py`
+- `tools/ip_parser_afl_harness.py`
+- `instrumentation.md`
+- `improvements.md`
+
+### Show coverage percentage in progress charts
+Improvements:
+- Updated `evaluation/plot_progress.py` so the coverage panel renders percentage-over-time instead of only raw coverage counts.
+- For fixed-size bitmap targets, the chart now shows percentage of the 65,536-slot bitmap.
+- For Atheris targets, the chart now shows percentage of the final observed `cov` for the run and labels that basis explicitly in the panel title.
+
+Reasons:
+- Raw coverage counts are harder to compare visually across runs and targets than a normalized percentage series.
+- Atheris logs expose `cov` as a count but do not provide the true denominator, so the chart now uses an honest relative percentage instead of implying an unavailable absolute percentage.
+
+Key files changed:
+- `evaluation/plot_progress.py`
+- `improvements.md`
+
+## 2026-04-14
+
+### Add cached bootstrap profiles for unknown formats
+Improvements:
+- Added an opt-in `python main.py bootstrap <target>` flow that generates and caches `config/<target>_bootstrap.json` artifacts with reusable seeds and generic mutation hints.
+- Extended generic seed loading to support binary-safe corpus directories, cached bootstrap artifacts, and JSON seed files before falling back to config examples.
+- Taught the generic semantic mutator to switch into hint-aware binary/container mutations for unknown formats such as PDF while leaving format-specific mutators unchanged.
+- Added focused regression checks for cached bootstrap loading, corpus precedence, PDF-style manual profiles, and binary/container mutation behavior.
+
+Reasons:
+- Unknown formats previously fell back to text-oriented generic mutation, which was a poor fit for binary/container inputs.
+- A one-time cached bootstrap path keeps LLM usage practical and cost-effective by removing any network dependency from the hot fuzzing loop.
+
+Key files changed:
+- `fuzzer/bootstrap.py`
+- `fuzzer/seed_generator.py`
+- `fuzzer/mutation/tier2_semantic.py`
+- `main.py`
+- `evaluation/bootstrap_checks.py`
+- `improvements.md`
+
 ## 2026-03-26
 
 ### Refresh README and pipeline docs for executor/oracle changes
@@ -466,18 +536,37 @@ Reasons:
 Key files changed:
 - `requirements.txt`
 
-### Add ISTD evaluation metrics and graphs
+### Add evaluation metrics and graphs
 Improvements:
-- Added an explicit `interesting_test_cases` series to `plot_data` so ISTD Graph 1.2 and Graph 1.3 can be rendered directly from run output.
+- Added an explicit `interesting_test_cases` series to `plot_data` so interesting test cases vs wall-clock time and vs total tests can be rendered directly from run output.
 - Added separate average generation-time and execution-time metrics to `stats.txt` and `bug_coverage_summary.json`.
-- Added `evaluation/plot_istd_eval.py` to render interesting test cases vs wall-clock time and vs total tests as an SVG.
+- `evaluation/plot_progress.py` now writes both `progress.svg` and `eval_graphs.svg`.
 
 Reasons:
-- The existing output had enough raw signals for partial evaluation, but the requested ISTD figures and RQ2 timing breakdown were not directly available.
+- The existing output had enough raw signals for partial evaluation, but the RQ2 timing breakdown was not directly available.
 - Separating mutation-generation cost from target-execution cost makes the efficiency table more accurate than using combined `execs/sec` alone.
 
 Key files changed:
 - `main.py`
 - `evaluation/collect_metrics.py`
-- `evaluation/plot_istd_eval.py`
+- `evaluation/plot_progress.py`
 - `README.md`
+
+## 2026-04-14
+
+### Replace Linux black-box QEMU coverage with Frida
+Improvements:
+- Swapped the Linux binary executor path from AFL++ QEMU coverage to Frida Stalker block tracing for `ipv4`, `ipv6`, `cidrize`, and `cjson`.
+- Removed the `--no-qemu` CLI path, marked binary target configs as `frida`-instrumented, and updated the focused regression checks to cover Frida mode selection and missing-runtime handling.
+- Updated `setup.md` and `requirements.txt` so WSL setup installs and verifies Frida instead of AFL++.
+
+Reasons:
+- The project now uses Frida as the sole Linux black-box instrumentation backend, so the executor, configs, tests, and setup guide needed to converge on the same runtime model.
+- Keeping subprocess-based stdout/stderr parsing while collecting coverage through Frida preserves existing oracle and bug classification behavior.
+
+Key files changed:
+- `fuzzer/executor.py`
+- `main.py`
+- `evaluation/oracle_checks.py`
+- `setup.md`
+- `requirements.txt`
