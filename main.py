@@ -608,7 +608,7 @@ def _postprocess_atheris_results(
     (results_dir / "unique_bugs.json").write_text(
         json.dumps({
             "target": target,
-            "count_definition": "Real bugs deduplicated by canonical bug site: traceback exception class plus source filename and line when available, otherwise parser-reported site, otherwise normalized fallback fields, and finally exception text.",
+            "count_definition": "Real bugs deduplicated by canonical bug site. For invalidity, the key is source filename and line when available; other bug types also include the exception class. When no source location is available, dedup falls back to normalized exception fields and finally exception text.",
             "unique_bug_count": len(unique_bugs),
             "parser_site_unique_bug_count": len(parser_site_bug_signatures),
             "traceback_unique_bug_count": len(traceback_bug_signatures),

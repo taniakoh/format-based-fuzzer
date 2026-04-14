@@ -109,19 +109,32 @@ def derive_bug_site(
     fallback_lineno: int | None = None,
 ) -> dict[str, object]:
     parser_bug_site = parser_bug_site or {}
+    bug_type_str = str(bug_type)
+
+    def _site_payload(
+        dedup_source: str,
+        exception_class: str,
+        filename: str,
+        lineno: int,
+    ) -> dict[str, object]:
+        payload = {
+            "bug_type": bug_type_str,
+            "dedup_source": dedup_source,
+            "filename": filename,
+            "lineno": lineno,
+        }
+        # Invalidity findings are deduplicated by source location alone so
+        # parser wording changes on the same rejection site do not inflate counts.
+        if bug_type_str != "invalidity":
+            payload["exception_class"] = exception_class
+        return payload
 
     frames = _parse_traceback_frames(traceback_text)
     traceback_exc_type = _traceback_exception_class(traceback_text)
     if frames:
         filename, lineno = frames[-1]
         exception_class = traceback_exc_type or str(fallback_exc_type or "").strip() or _exception_class_from_text(exception)
-        payload = {
-            "bug_type": str(bug_type),
-            "dedup_source": "traceback",
-            "exception_class": exception_class,
-            "filename": filename,
-            "lineno": lineno,
-        }
+        payload = _site_payload("traceback", exception_class, filename, lineno)
         return {
             "dedup_source": "traceback",
             "exception_class": exception_class,
@@ -136,13 +149,7 @@ def derive_bug_site(
     if parser_filename and parser_lineno is not None:
         parser_exc_type = str(parser_bug_site.get("exc_type", "") or "")
         exception_class = parser_exc_type or str(fallback_exc_type or "").strip() or _exception_class_from_text(exception)
-        payload = {
-            "bug_type": str(bug_type),
-            "dedup_source": "parser_reported",
-            "exception_class": exception_class,
-            "filename": parser_filename,
-            "lineno": int(parser_lineno),
-        }
+        payload = _site_payload("parser_reported", exception_class, parser_filename, int(parser_lineno))
         return {
             "dedup_source": "parser_reported",
             "exception_class": exception_class,
@@ -154,13 +161,7 @@ def derive_bug_site(
 
     if fallback_filename and fallback_lineno is not None:
         exception_class = str(fallback_exc_type or "").strip() or _exception_class_from_text(exception)
-        payload = {
-            "bug_type": str(bug_type),
-            "dedup_source": "csv_fields",
-            "exception_class": exception_class,
-            "filename": fallback_filename,
-            "lineno": int(fallback_lineno),
-        }
+        payload = _site_payload("csv_fields", exception_class, fallback_filename, int(fallback_lineno))
         return {
             "dedup_source": "csv_fields",
             "exception_class": exception_class,
@@ -601,7 +602,7 @@ class MetricsCollector:
         entries.sort(key=lambda item: int(item["first_seen_exec"]))
         payload = {
             "target": self.target,
-            "count_definition": "Real bugs deduplicated by canonical bug site: traceback exception class plus source filename and line when available, otherwise parser-reported site, otherwise normalized fallback fields, and finally exception text.",
+            "count_definition": "Real bugs deduplicated by canonical bug site. For invalidity, the key is source filename and line when available; other bug types also include the exception class. When no source location is available, dedup falls back to normalized exception fields and finally exception text.",
             "unique_bug_count": self.metrics.unique_bug_count,
             "parser_site_unique_bug_count": self.metrics.parser_site_unique_bug_count,
             "traceback_unique_bug_count": self.metrics.traceback_unique_bugs,

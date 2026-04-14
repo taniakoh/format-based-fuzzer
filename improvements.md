@@ -2,6 +2,21 @@
 
 Use this file to record meaningful improvements, refactors, feature additions, performance work, and reliability upgrades.
 
+## 2026-04-15
+
+### Add environment template for bootstrap LLM settings
+Improvements:
+- Added a repo-root `.env.template` documenting the OpenAI environment variables used by the bootstrap flow.
+- Included the default base URL and model so bootstrap setup is easier to reproduce across machines.
+
+Reasons:
+- The code reads `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL` from the environment, but the repository did not include a starter template.
+- A visible template lowers setup friction for anyone trying the LLM-assisted bootstrap path for new formats.
+
+Key files changed:
+- `.env.template`
+- `improvements.md`
+
 ## 2026-04-14
 
 ### Unify bug metrics around canonical bug sites

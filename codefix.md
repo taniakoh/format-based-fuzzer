@@ -266,6 +266,23 @@ Key files changed:
 - `evaluation/oracle_checks.py`
 - `codefix.md`
 
+## 2026-04-15
+
+### Collapse invalidity counts by bug site
+Improvements:
+- Changed unique-bug deduplication so `invalidity` findings with the same source filename and line count as one bug even when their parser messages differ.
+- Kept exception-class-aware deduplication for non-`invalidity` bug types, preserving the more specific grouping for validity, bonus, performance, and crash-style bugs.
+- Updated the saved `unique_bugs.json` count definition text in both the live metrics collector and the Atheris post-processing path to match the new rule.
+
+Reasons:
+- Parser rejections from the same code site were being split into multiple unique bugs purely because the parse message text or exception flavor changed.
+- This overstated headline unique-bug totals and made `invalidity` counts disagree with the intended "same line means same bug" interpretation.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
+- `main.py`
+- `codefix.md`
+
 ## 2026-04-14
 
 ### Add opt-in Frida executor diagnostics
