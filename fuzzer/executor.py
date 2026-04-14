@@ -286,6 +286,19 @@ class BugType:
     ORACLE_UNKNOWN_REJECT = "oracle_unknown_reject"
 
 
+_INSTRUMENTATION_NOISE_PATTERNS = (
+    "loader crashed",
+    "process not found",
+    "the connection is closed",
+    "unexpected crash while trying to allocate memory",
+)
+
+
+def _is_instrumentation_noise_message(message: str) -> bool:
+    lowered = (message or "").strip().lower()
+    return any(pattern in lowered for pattern in _INSTRUMENTATION_NOISE_PATTERNS)
+
+
 @dataclass
 class RunResult:
     input_str: str
@@ -312,10 +325,16 @@ class RunResult:
 
     @property
     def is_crash(self) -> bool:
-        return self.bug_type in (BugType.CRASH, BugType.TIMEOUT)
+        return self.bug_type in (BugType.CRASH, BugType.TIMEOUT) and not self.is_instrumentation_noise
+
+    @property
+    def is_instrumentation_noise(self) -> bool:
+        return self.bug_type == BugType.CRASH and _is_instrumentation_noise_message(self.exception_msg)
 
     @property
     def is_real_bug(self) -> bool:
+        if self.is_instrumentation_noise:
+            return False
         return self.bug_type in (
             BugType.VALIDITY,
             BugType.BONUS,
@@ -396,6 +415,8 @@ def _taxonomy_tags(result: "RunResult") -> list[str]:
         tags.append("FunctionalBug")
     if result.is_crash or result.bug_type == BugType.RELIABILITY:
         tags.append("ReliabilityBug")
+    if result.is_instrumentation_noise:
+        tags.append("InstrumentationNoise")
     if result.bug_type in (BugType.TIMEOUT, BugType.PERFORMANCE):
         tags.append("PerformanceBug")
     if result.bug_type == BugType.BONUS:
@@ -800,8 +821,6 @@ class Executor:
     def _apply_oracle(self, result: RunResult) -> RunResult:
         verdict = evaluate_target_input(self.target, result.input_str)
         result.oracle = verdict
-        if result.bug_type in (BugType.CRASH, BugType.TIMEOUT):
-            return result
 
         parser_type = result.parser_reported_bug_type
         if parser_type:
@@ -811,6 +830,9 @@ class Executor:
                 or result.exception_msg
                 or f"Parser reported a {result.bug_type} bug"
             )
+            return result
+
+        if result.bug_type in (BugType.CRASH, BugType.TIMEOUT):
             return result
 
         observed_rejection = bool(result.traceback) or result.exit_code == 1

@@ -18,6 +18,32 @@ Key files changed:
 - ...
 ```
 
+## 2026-04-15
+
+### Prefer parser-reported bug kinds over crash fallback
+Improvements:
+- Reordered executor classification so explicit parser-reported bug kinds such as `validity` and `invalidity` override the provisional `CRASH` fallback when the target still emitted a structured bug report.
+
+Reasons:
+- Prevents inputs like `255.00.254.254` from being recorded as crashes when direct replay shows the parser actually reported a semantic bug.
+- Keeps abnormal exit codes from hiding more specific parser classifications that are already present in stdout.
+
+Key files changed:
+- `fuzzer/executor.py`
+
+### Exclude instrumentation noise from bug-count CSVs
+Improvements:
+- Filtered `logs/bug_counts.csv` generation so known runtime and instrumentation failures no longer appear in the aggregated bug-count output.
+- Applied the same exclusion in the metrics collector and the JSON/Atheris post-processing path to keep CSV behavior consistent across targets.
+
+Reasons:
+- Prevents Frida and loader failures such as `loader crashed`, `process not found`, and allocator/runtime crashes from being mistaken for parser bugs in downstream CSV review.
+- Aligns `bug_counts.csv` with the repository's existing instrumentation-noise and real-bug classification rules.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
+- `main.py`
+
 ## 2026-03-26
 
 ### Stop classifying bugs from target bug-count text
@@ -251,6 +277,7 @@ Improvements:
 - Added Frida agent debug messages for target-module selection, thread enumeration, and thread-follow attempts so zero-coverage runs can be narrowed down without guessing.
 - Fixed Linux `--coverage hash` runs to use the Linux binary instead of falling back to the Windows PyInstaller executable.
 - Removed the parent-side `SIGSTOP`/`SIGCONT` around Frida attach after debugging showed the stopped process exposed zero threads to the agent and led to timeouts with no coverage.
+- Excluded known Frida/runtime failure strings such as `loader crashed`, `process not found`, `the connection is closed`, and allocator crash messages from headline real-bug and unique-crash counts while keeping them logged as instrumentation noise.
 
 Reasons:
 - `Executor mode : Frida` only confirms mode selection, not that attach, script injection, or edge collection actually succeeded.
@@ -260,6 +287,7 @@ Reasons:
 - The remaining zero-edge timeout needed more visibility into which module and threads the agent was actually following.
 - On WSL, forcing `hash` should still keep execution on the native Linux binary so performance comparisons are meaningful.
 - The extra diagnostics showed that attaching while the child was stopped yielded `threadCount: 0`, so the agent had no threads to follow and never produced Stalker events.
+- Known Frida/runtime failure modes were inflating crash-centric headline metrics even though they were harness artifacts rather than target bugs.
 
 Key files changed:
 - `fuzzer/executor.py`

@@ -320,7 +320,7 @@ All results are written to `results/<target>/`:
 | `unique_bugs.json` | Deduplicated bug signatures with first-seen execution, oracle context, and one example input |
 | `crashes/crash_NNNNNN.txt` | One file per crashing input |
 | `queue/id_NNNNNN.txt` | Interesting inputs re-added to the corpus, with exec number and priority |
-| `plot_data` | CSV progress samples over time (`relative_time_sec`, `total_execs`, `behaviors_seen`, `interesting_test_cases`, `corpus_size`, `unique_bugs`, `unique_crashes`) |
+| `plot_data` | CSV progress samples over time (`relative_time_sec`, `total_execs`, `coverage_seen`, `coverage_percent`, `interesting_test_cases`, `corpus_size`, `unique_bugs`, `unique_crashes`) |
 | `progress.svg` | Optional chart generated from `plot_data` with `evaluation/plot_progress.py` |
 | `fuzzer_config` | JSON snapshot of the effective run configuration |
 | `fuzzer_stats` | Duplicate of the end-of-run text summary for AFL/Neuzz-style tooling |
@@ -363,12 +363,15 @@ python evaluation/plot_progress.py ipv4
 python evaluation/plot_progress.py results/ipv4/plot_data --output results/ipv4/my_plot.svg
 ```
 
-This writes an SVG dashboard with one panel per metric, using raw values over
-time so plateaus are easier to spot than in a normalized single-line overlay.
+This writes an SVG dashboard with one panel per metric. Coverage is rendered as
+percentage-over-time for easier comparisons, while the raw `coverage_seen`
+count remains available in `plot_data`, `stats.txt`, and
+`bug_coverage_summary.json`.
 
 Read the panels like this:
 
-- `behaviors_seen`: your proxy coverage growth
+- `coverage_seen`: your raw proxy coverage growth
+- `coverage_percent`: percentage of the 65,536-slot bitmap covered so far
 - `unique_bugs`: distinct saved bug signatures found so far
 - `corpus_size`: how many interesting seeds entered the queue
 - `unique_crashes`: distinct crash signatures, deduplicated by `(bug_type, exit_code, exception)`
@@ -394,9 +397,30 @@ For older runs without an explicit `interesting_test_cases` column, `eval_graphs
 
 - `Avg gen/test`: average candidate generation time, excluding target execution
 - `Avg run/test`: average target execution time only
+- `Coverage percent`: raw coverage normalized against the 65,536-slot bitmap
 
 These are collected separately inside the main fuzz loop, so they can be used
 for the RQ2 efficiency table without relying on combined `execs/sec`.
+
+### Aggregating report metrics
+
+To produce report-ready summaries across completed runs:
+
+```bash
+python evaluation/report_metrics.py
+python evaluation/report_metrics.py results savedruns --output-dir results/report
+```
+
+This writes:
+
+- `results/report/report_metrics.json`: machine-readable RQ1-RQ4 summary grouped by target and evaluation mode
+- `results/report/report_metrics.md`: concise Markdown summary for the report
+- `results/report/curves/*.csv`: averaged curve data for `#unique crashes vs time`, `#interesting test cases vs time`, `#interesting test cases vs #tests`, and `coverage vs time`
+
+The aggregator expects finished run directories containing `fuzzer_config`,
+`bug_coverage_summary.json`, and `plot_data` (or Atheris-compatible logs). For
+baseline and stability claims, collect at least five runs per target/mode and
+then rerun the aggregator over those saved outputs.
 
 ---
 

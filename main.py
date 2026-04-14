@@ -45,7 +45,7 @@ from evaluation.collect_metrics import MetricsCollector, derive_bug_site
 from fuzzer.bootstrap import ensure_bootstrap_profile
 from fuzzer.corpus import Corpus
 from fuzzer.coverage import CoverageAnalyzer
-from fuzzer.executor import Executor, register_binary
+from fuzzer.executor import Executor, _is_instrumentation_noise_message, register_binary
 from fuzzer.format_loader import load_format
 from fuzzer.mutation.tier1_structure import StructureMutator
 from fuzzer.mutation.tier2_semantic import get_mutator
@@ -534,6 +534,7 @@ def _postprocess_atheris_results(
         bug_record = _classify_atheris_crash(crash_file)
         bug_type = str(bug_record["bug_type"])
         exc_msg = str(bug_record["exception"])
+        is_instrumentation_noise = bug_type == "CRASH" and _is_instrumentation_noise_message(exc_msg)
         tb_text = str(bug_record.get("traceback", "") or "")
         exc_type = str(bug_record.get("exc_type", "") or "")
         bug_type_counts[bug_type] += 1
@@ -576,7 +577,7 @@ def _postprocess_atheris_results(
             "total_occurrences": 1,
         }
         unique_findings[site_key] = entry
-        if bug_type not in ("invalidity",):
+        if bug_type not in ("invalidity",) and not is_instrumentation_noise:
             if site_key not in unique_bugs:
                 unique_bugs[site_key] = entry
             else:
@@ -584,17 +585,18 @@ def _postprocess_atheris_results(
             if bug_site.get("dedup_source") == "traceback":
                 traceback_bug_signatures.add(site_key)
 
-        row_key = site_key
-        if row_key not in bug_count_rows:
-            bug_count_rows[row_key] = {
-                "bug_type": bug_type,
-                "exc_type": str(bug_site.get("exception_class", "") or exc_type),
-                "exc_message": exc_msg,
-                "filename": str(bug_site.get("filename", "") or ""),
-                "lineno": "" if bug_site.get("lineno", None) is None else int(bug_site["lineno"]),
-                "count": 0,
-            }
-        bug_count_rows[row_key]["count"] = int(bug_count_rows[row_key]["count"]) + 1
+        if not is_instrumentation_noise:
+            row_key = site_key
+            if row_key not in bug_count_rows:
+                bug_count_rows[row_key] = {
+                    "bug_type": bug_type,
+                    "exc_type": str(bug_site.get("exception_class", "") or exc_type),
+                    "exc_message": exc_msg,
+                    "filename": str(bug_site.get("filename", "") or ""),
+                    "lineno": "" if bug_site.get("lineno", None) is None else int(bug_site["lineno"]),
+                    "count": 0,
+                }
+            bug_count_rows[row_key]["count"] = int(bug_count_rows[row_key]["count"]) + 1
 
     # bugs.jsonl
     bugs_jsonl = results_dir / "bugs.jsonl"

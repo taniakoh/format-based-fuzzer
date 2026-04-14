@@ -20,6 +20,7 @@ from pathlib import Path
 _HERE = Path(__file__).parent.parent
 RESULTS_DIR = _HERE / "results"
 _TRACEBACK_FRAME_RE = re.compile(r'^\s*File\s+"([^"]+)",\s+line\s+(\d+)')
+_BITMAP_COVERAGE_SLOTS = 65536
 
 
 def _first_nonempty_line(text: str) -> str:
@@ -52,6 +53,10 @@ def _bitmap_digest(bitmap: bytes | None) -> str:
     if not bitmap or not any(bitmap):
         return ""
     return hashlib.sha256(bitmap).hexdigest()[:16]
+
+
+def _coverage_percent(coverage_seen: int) -> float:
+    return (coverage_seen / float(_BITMAP_COVERAGE_SLOTS)) * 100.0
 
 
 def _parse_traceback_frames(traceback_text: str) -> list[tuple[str, int]]:
@@ -301,6 +306,7 @@ class MetricsCollector:
                 "relative_time_sec",
                 "total_execs",
                 "coverage_seen",
+                "coverage_percent",
                 "interesting_test_cases",
                 "corpus_size",
                 "unique_bugs",
@@ -423,6 +429,7 @@ class MetricsCollector:
             "exec": self.metrics.total_executions,
             "input": input_str,
             "bug_type": result.bug_type,
+            "instrumentation_noise": bool(getattr(result, "is_instrumentation_noise", False)),
             "classification": _taxonomy_payload(result),
             "signature": {k: v for k, v in signature.items() if k != "key"},
             "bug_site": {k: v for k, v in bug_site.items() if k != "key"},
@@ -505,6 +512,7 @@ class MetricsCollector:
                 f"{time.time() - self._start:.3f}",
                 self.metrics.total_executions,
                 self.metrics.behaviors_covered,
+                f"{_coverage_percent(self.metrics.behaviors_covered):.6f}",
                 self.metrics.interesting_test_case_count,
                 corpus_size,
                 self.metrics.unique_bug_count,
@@ -686,6 +694,7 @@ class MetricsCollector:
                 "pass_count": self.metrics.pass_count,
                 "pass_rate": round(self.metrics.pass_count / max(1, total_execs), 4),
                 "coverage_seen": self.metrics.behaviors_covered,
+                "coverage_percent": round(_coverage_percent(self.metrics.behaviors_covered), 6),
                 "interesting_test_cases": self.metrics.interesting_test_case_count,
                 "corpus_size": self._last_corpus_size(),
                 "avg_generation_time_ms": round(
@@ -734,6 +743,8 @@ class MetricsCollector:
                 if not line.strip():
                     continue
                 entry = json.loads(line)
+                if bool(entry.get("instrumentation_noise", False)):
+                    continue
                 bug_type = str(entry.get("bug_type", "unknown"))
                 exception = str(entry.get("exception", "") or "")
                 parser_bug_site = entry.get("parser_bug_site", {}) or {}
@@ -795,6 +806,7 @@ class MetricsCollector:
         pass_rate = m.pass_count / max(1, m.total_executions)
         avg_generation_ms = m.total_generation_time_ms / max(1, m.total_executions)
         avg_execution_ms = m.total_execution_time_ms / max(1, m.total_executions)
+        coverage_percent = _coverage_percent(m.behaviors_covered)
         lines = [
             f"Target          : {m.target}",
             f"Eval mode req   : {self._run_metadata.get('evaluation_mode_requested', 'N/A')}",
@@ -806,6 +818,7 @@ class MetricsCollector:
             f"Avg run/test    : {avg_execution_ms:.3f} ms",
             f"Pass (clean)    : {m.pass_count} ({pass_rate:.1%})",
             f"Coverage seen   : {m.behaviors_covered}",
+            f"Coverage percent: {coverage_percent:.3f}% of {_BITMAP_COVERAGE_SLOTS}-slot bitmap",
             f"Interesting tests: {m.interesting_test_case_count}",
             f"Interesting results: {m.interesting_result_count}",
             f"Unique bugs     : {m.unique_bug_count}",

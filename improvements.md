@@ -53,6 +53,36 @@ Key files changed:
 
 ## 2026-04-14
 
+### Persist coverage percentage in run outputs
+Improvements:
+- Added `coverage_percent` to `plot_data`, `bug_coverage_summary.json`, and `stats.txt` / `fuzzer_stats`.
+- Kept raw `coverage_seen` alongside the normalized percentage so run artifacts still preserve the absolute bitmap count.
+- Updated README output docs to match the new saved metrics.
+
+Reasons:
+- Coverage percentage was already shown in charts, but not persisted in the primary machine-readable and text summaries.
+- Saving both raw and normalized coverage makes evaluation tables and comparisons easier without forcing downstream scripts to recompute the percentage.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
+- `README.md`
+- `improvements.md`
+
+### Add report-metrics aggregator for RQ1-RQ4
+Improvements:
+- Added `evaluation/report_metrics.py` to scan finished run directories and aggregate report-ready metrics by target and evaluation mode.
+- The script now writes both summary outputs (`report_metrics.json`, `report_metrics.md`) and averaged curve CSVs for the required report graphs.
+- Documented the aggregation workflow in the README so repeated-run evaluation can be produced without manual copy-paste.
+
+Reasons:
+- The raw fuzzer outputs already contained most single-run metrics, but the course report requires repeated-run summaries, baseline comparisons, and stability reporting.
+- Automating the aggregation step reduces reporting mistakes and makes it easier to regenerate RQ1-RQ4 tables and graphs after new runs finish.
+
+Key files changed:
+- `evaluation/report_metrics.py`
+- `README.md`
+- `improvements.md`
+
 ### Add cached bootstrap profiles for unknown formats
 Improvements:
 - Added an opt-in `python main.py bootstrap <target>` flow that generates and caches `config/<target>_bootstrap.json` artifacts with reusable seeds and generic mutation hints.
