@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RESULTS_DIR = ROOT / "results"
 SERIES = (
     ("coverage_percent", "#1d4ed8", "Coverage"),
-    ("unique_bugs", "#b91c1c", "Unique bugs"),
+    ("unique_bugs", "#b91c1c", "Unique bug sites"),
     ("corpus_size", "#047857", "Corpus size"),
     ("unique_crashes", "#7c3aed", "Unique crashes"),
 )

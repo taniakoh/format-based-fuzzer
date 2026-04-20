@@ -30,28 +30,60 @@ class CoverageAnalyzer:
         self.use_afl_hit_count_buckets = use_afl_hit_count_buckets
         self.global_bitmap = bytearray(BITMAP_SIZE)
         self.virgin_bitmap = bytearray([_VIRGIN_BYTE]) * BITMAP_SIZE
+        self.slot_hit_counts = [0] * BITMAP_SIZE
         self.edge_count = 0  # unique bitmap slots seen at least once
 
     def is_interesting(self, bitmap: bytes) -> bool:
         """Return True if this run discovered new coverage."""
+        return self.observe(bitmap)["is_interesting"]
+
+    def observe(self, bitmap: bytes) -> dict[str, float | int | bool]:
+        """Record one coverage observation and return novelty/rarity metadata."""
         if self.use_afl_hit_count_buckets:
-            return self._is_interesting_afl(bitmap)
+            return self._observe_afl(bitmap)
 
         new_edges = False
+        rarity_score = 0.0
+        active_slots = 0
+        new_slot_count = 0
         for i, byte in enumerate(bitmap):
-            if byte and not self.global_bitmap[i]:
+            if not byte:
+                continue
+
+            active_slots += 1
+            seen = self.slot_hit_counts[i]
+            rarity_score += 1.0 / (1.0 + seen)
+            self.slot_hit_counts[i] = seen + 1
+
+            if not self.global_bitmap[i]:
                 self.global_bitmap[i] = byte
                 self.edge_count += 1
                 new_edges = True
-        return new_edges
+                new_slot_count += 1
 
-    def _is_interesting_afl(self, bitmap: bytes) -> bool:
-        """Apply AFL-style virgin-bitmap novelty to a raw trace bitmap."""
+        rarity_score += new_slot_count * 1.5
+        return {
+            "is_interesting": new_edges,
+            "rarity_score": rarity_score,
+            "active_slots": active_slots,
+            "new_slots": new_slot_count,
+        }
+
+    def _observe_afl(self, bitmap: bytes) -> dict[str, float | int | bool]:
+        """Apply AFL-style novelty and compute a rarity score for raw trace bitmaps."""
         new_edges = False
+        rarity_score = 0.0
+        active_slots = 0
+        new_slot_count = 0
         for i, byte in enumerate(bitmap):
             bucketed = _COUNT_CLASS_LOOKUP[byte]
             if not bucketed:
                 continue
+
+            active_slots += 1
+            seen = self.slot_hit_counts[i]
+            rarity_score += 1.0 / (1.0 + seen)
+            self.slot_hit_counts[i] = seen + 1
 
             if bucketed & self.virgin_bitmap[i]:
                 # Count every new hit-count bucket as a new event, matching AFL
@@ -61,7 +93,15 @@ class CoverageAnalyzer:
                 self.virgin_bitmap[i] &= ~bucketed
                 self.edge_count += 1
                 new_edges = True
-        return new_edges
+                new_slot_count += 1
+
+        rarity_score += new_slot_count * 1.5
+        return {
+            "is_interesting": new_edges,
+            "rarity_score": rarity_score,
+            "active_slots": active_slots,
+            "new_slots": new_slot_count,
+        }
 
     def coverage_summary(self) -> dict:
         return {

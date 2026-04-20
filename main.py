@@ -38,7 +38,7 @@ import sys
 import threading
 import time
 import traceback
-from collections import Counter
+from collections import Counter, deque
 from pathlib import Path
 
 from evaluation.collect_metrics import MetricsCollector, derive_bug_site
@@ -56,6 +56,13 @@ from fuzzer.seed_generator import get_seed_generator
 # Train the surrogate every N new behaviors discovered.
 # Needs at least this many samples before the gradient signal is meaningful.
 TRAIN_EVERY = 10
+TRAINING_BUFFER_MAX = 512
+TRAINING_NON_NEW_SAMPLE_RATE = 0.15
+TRAINING_NEAR_MISS_SAMPLE_RATE = 0.60
+TRAINING_SHALLOW_INVALIDITY_SAMPLE_RATE = 0.02
+SHALLOW_INVALIDITY_RARITY_DISCOUNT = 0.10
+VALID_INPUT_RARITY_BOOST = 1.20
+REAL_BUG_RARITY_BOOST = 1.35
 _HERE = Path(__file__).parent
 EVALUATION_MODES = ("auto", "havoc_only", "semantic_plus_havoc", "static_payoff", "hybrid_dl")
 
@@ -126,6 +133,103 @@ def _write_seed_corpus(seeds: list[bytes], out_dir: Path) -> int:
     return written
 
 
+def _result_training_priority(result) -> str:
+    bug_type = str(getattr(result, "bug_type", "PASS") or "PASS")
+    if bug_type != "PASS":
+        return "near_miss"
+    if str(getattr(result, "parser_reported_bug_type", "") or ""):
+        return "near_miss"
+    oracle = getattr(result, "oracle", None)
+    if oracle is not None and getattr(oracle, "supported", False):
+        return "structured"
+    return "background"
+
+
+def _is_shallow_invalidity(result) -> bool:
+    oracle = getattr(result, "oracle", None)
+    return (
+        str(getattr(result, "bug_type", "") or "") == "invalidity"
+        and oracle is not None
+        and bool(getattr(oracle, "supported", False))
+        and getattr(oracle, "expected_valid", None) is False
+    )
+
+
+def _oracle_expected_valid(result) -> bool:
+    oracle = getattr(result, "oracle", None)
+    return bool(
+        oracle is not None
+        and getattr(oracle, "supported", False)
+        and getattr(oracle, "expected_valid", None) is True
+    )
+
+
+def _should_record_training_sample(*, is_new: bool, result) -> bool:
+    if _is_shallow_invalidity(result):
+        return random.random() < TRAINING_SHALLOW_INVALIDITY_SAMPLE_RATE
+    if is_new:
+        return True
+    priority = _result_training_priority(result)
+    if priority == "near_miss":
+        return random.random() < TRAINING_NEAR_MISS_SAMPLE_RATE
+    if priority == "structured":
+        return random.random() < max(TRAINING_NON_NEW_SAMPLE_RATE, 0.25)
+    return random.random() < TRAINING_NON_NEW_SAMPLE_RATE
+
+
+def _append_training_sample(training_buffer, *, mutated: bytes, bitmap: bytes, is_new: bool, result) -> bool:
+    if not _should_record_training_sample(is_new=is_new, result=result):
+        return False
+    positions = [index for index, value in enumerate(bitmap) if value]
+    training_buffer.append((mutated, positions))
+    return True
+
+
+def _classify_novelty_signal(*, result, coverage_observation: dict[str, float | int | bool]) -> dict[str, float | bool | str]:
+    raw_is_new = bool(coverage_observation["is_interesting"])
+    rarity_score = float(coverage_observation["rarity_score"])
+    learning_is_new = raw_is_new
+    corpus_is_new = raw_is_new
+    reason = "raw_coverage"
+
+    if _is_shallow_invalidity(result):
+        learning_is_new = False
+        corpus_is_new = False
+        rarity_score *= SHALLOW_INVALIDITY_RARITY_DISCOUNT
+        reason = "shallow_invalidity"
+    else:
+        if _oracle_expected_valid(result):
+            rarity_score *= VALID_INPUT_RARITY_BOOST
+            reason = "oracle_valid"
+        if bool(getattr(result, "is_real_bug", False)):
+            rarity_score *= REAL_BUG_RARITY_BOOST
+            reason = "real_bug" if reason == "raw_coverage" else f"{reason}+real_bug"
+
+    return {
+        "raw_is_new": raw_is_new,
+        "learning_is_new": learning_is_new,
+        "corpus_is_new": corpus_is_new,
+        "rarity_score": rarity_score,
+        "reason": reason,
+    }
+
+
+def _current_bug_site_key(result) -> str:
+    parser_bug_site = {
+        "bug_type": getattr(result, "parser_reported_bug_type", None),
+        "exc_type": getattr(result, "parser_reported_exc_type", ""),
+        "filename": getattr(result, "parser_reported_filename", ""),
+        "lineno": getattr(result, "parser_reported_lineno", None),
+    }
+    site = derive_bug_site(
+        bug_type=str(getattr(result, "bug_type", "") or ""),
+        exception=str(getattr(result, "exception_msg", "") or ""),
+        traceback_text=str(getattr(result, "traceback", "") or ""),
+        parser_bug_site=parser_bug_site,
+    )
+    return str(site["key"])
+
+
 def _init_dl_for_atheris(
     target: str,
     fmt: dict,
@@ -176,7 +280,7 @@ def _dl_monitor_atheris(
 
     POLL_INTERVAL = 30  # seconds between checks
     seen_files: set[Path] = set(corpus_dir.glob("*")) | set(crashes_dir.glob("*"))
-    training_buffer: list[tuple[bytes, list[int]]] = []
+    training_buffer: deque[tuple[bytes, list[int]]] = deque(maxlen=TRAINING_BUFFER_MAX)
     rounds = 0
     run_start = time.time()
     dl_training_path = corpus_dir.parent / "dl_training.jsonl"
@@ -523,6 +627,7 @@ def _postprocess_atheris_results(
     parser_site_bug_signatures: set[str] = set()
     traceback_bug_signatures: set[str] = set()
     bug_count_rows: dict[str, dict[str, object]] = {}
+    raw_bug_count_rows: list[dict[str, object]] = []
 
     for crash_file in crash_files:
         try:
@@ -574,6 +679,7 @@ def _postprocess_atheris_results(
                 "exception": exc_msg,
                 "bitmap_digest": "",
             },
+            "site_hit_count": 1,
             "total_occurrences": 1,
         }
         unique_findings[site_key] = entry
@@ -581,11 +687,24 @@ def _postprocess_atheris_results(
             if site_key not in unique_bugs:
                 unique_bugs[site_key] = entry
             else:
-                unique_bugs[site_key]["total_occurrences"] = int(unique_bugs[site_key].get("total_occurrences", 1)) + 1
+                updated_count = int(unique_bugs[site_key].get("site_hit_count", 1)) + 1
+                unique_bugs[site_key]["site_hit_count"] = updated_count
+                unique_bugs[site_key]["total_occurrences"] = updated_count
             if bug_site.get("dedup_source") == "traceback":
                 traceback_bug_signatures.add(site_key)
 
         if not is_instrumentation_noise:
+            raw_bug_count_rows.append(
+                {
+                    "bug_type": bug_type,
+                    "exc_type": str(bug_site.get("exception_class", "") or exc_type),
+                    "exc_message": exc_msg,
+                    "filename": str(bug_site.get("filename", "") or ""),
+                    "lineno": "" if bug_site.get("lineno", None) is None else int(bug_site["lineno"]),
+                    "instrumentation_noise": 0,
+                    "crash_file": crash_file.name,
+                }
+            )
             row_key = site_key
             if row_key not in bug_count_rows:
                 bug_count_rows[row_key] = {
@@ -608,7 +727,8 @@ def _postprocess_atheris_results(
     (results_dir / "unique_bugs.json").write_text(
         json.dumps({
             "target": target,
-            "count_definition": "Real bugs deduplicated by canonical bug site. For invalidity, the key is source filename and line when available; other bug types also include the exception class. When no source location is available, dedup falls back to normalized exception fields and finally exception text.",
+            "count_definition": "Real bugs deduplicated by canonical bug site using source filename and line when available, regardless of exception class. When no source location is available, dedup falls back to normalized exception fields and finally exception text.",
+            "entry_count_field": "site_hit_count",
             "unique_bug_count": len(unique_bugs),
             "parser_site_unique_bug_count": len(parser_site_bug_signatures),
             "traceback_unique_bug_count": len(traceback_bug_signatures),
@@ -676,6 +796,31 @@ def _postprocess_atheris_results(
                 row["filename"],
                 row["lineno"],
                 row["count"],
+            ])
+
+    # logs/bug_counts_raw.csv  (one row per recorded finding)
+    with open(logs_dir / "bug_counts_raw.csv", "w", encoding="utf-8", newline="") as f:
+        writer = _csv.writer(f)
+        writer.writerow(["crash_file", "bug_type", "exc_type", "exc_message", "filename", "lineno", "instrumentation_noise"])
+        for row in sorted(
+            raw_bug_count_rows,
+            key=lambda row: (
+                str(row["crash_file"]),
+                str(row["bug_type"]),
+                str(row["filename"]),
+                "" if row["lineno"] == "" else f"{int(row['lineno']):09d}",
+                str(row["exc_type"]),
+                str(row["exc_message"]),
+            ),
+        ):
+            writer.writerow([
+                row["crash_file"],
+                row["bug_type"],
+                row["exc_type"],
+                row["exc_message"],
+                row["filename"],
+                row["lineno"],
+                row["instrumentation_noise"],
             ])
 
     # minimal plot_data CSV so plot_progress.py can render a chart
@@ -964,7 +1109,7 @@ def fuzz(
     )
 
     training_buffer: list[tuple[bytes, list[int]]] = []
-    behaviors_since_last_train = 0
+    samples_since_last_train = 0
     dl_training_rounds_this_run = 0
 
     start = time.time()
@@ -1072,9 +1217,30 @@ def fuzz(
         metrics.record_timing(generation_ms, execution_ms)
         metrics.record_execution(mutated, result, bitmap)
 
-        is_new = coverage.is_interesting(bitmap)
-        metrics.record_oracle_log(mutated, result.bug_type, is_new, execution_ms)
-        corpus.record_result(seed, is_new)
+        coverage_observation = coverage.observe(bitmap)
+        novelty_signal = _classify_novelty_signal(
+            result=result,
+            coverage_observation=coverage_observation,
+        )
+        raw_is_new = bool(novelty_signal["raw_is_new"])
+        is_new = bool(novelty_signal["learning_is_new"])
+        corpus_is_new = bool(novelty_signal["corpus_is_new"])
+        rarity_score = float(novelty_signal["rarity_score"])
+        metrics.record_oracle_log(mutated, result.bug_type, raw_is_new, execution_ms)
+        bug_site_key = _current_bug_site_key(result)
+        feedback = {"cooldown_factor": 1.0}
+        if hasattr(scheduler, "record_execution_feedback"):
+            feedback = scheduler.record_execution_feedback(
+                result=result,
+                bug_site_key=bug_site_key,
+                is_new=is_new,
+            )
+        corpus.record_result(
+            seed,
+            is_new,
+            rarity_score=rarity_score,
+            cooldown_factor=float(feedback.get("cooldown_factor", 1.0)),
+        )
         if hasattr(scheduler, "record_mutation_outcome"):
             scheduler.record_mutation_outcome(
                 plan=plan,
@@ -1082,6 +1248,15 @@ def fuzz(
                 semantic_trace=semantic_trace,
                 havoc_trace=havoc_trace,
             )
+        added_training_sample = _append_training_sample(
+            training_buffer,
+            mutated=mutated,
+            bitmap=bitmap,
+            is_new=is_new,
+            result=result,
+        )
+        if added_training_sample:
+            samples_since_last_train += 1
 
         # Track stagnation
         current_unique_bugs = metrics.metrics.unique_bug_count
@@ -1118,37 +1293,37 @@ def fuzz(
                 f"unique_bugs={current_unique_bugs} — likely found all reachable bugs."
             )
 
-        if is_new:
-            priority = scheduler.get_seed_priority(mutated)
-            corpus.add(mutated, priority=priority)
+        if raw_is_new:
             metrics.update_coverage(coverage.edge_count)
+
+        if corpus_is_new:
+            priority = scheduler.get_seed_priority(mutated) * (1.0 + min(2.5, rarity_score) * 0.20)
+            corpus.add(mutated, priority=priority, rare_score=rarity_score)
             metrics.record_queue_entry(mutated, exec_count, priority)
             print(
                 f"[NEW] execs={exec_count:>6} behaviors={coverage.edge_count:>4} "
-                f"corpus={len(corpus):>4} input={mutated[:60]!r}"
+                f"corpus={len(corpus):>4} rarity={rarity_score:>5.2f} "
+                f"kind={novelty_signal['reason']} input={mutated[:60]!r}"
             )
 
-            positions = [index for index, value in enumerate(bitmap) if value]
-            training_buffer.append((mutated, positions))
-            behaviors_since_last_train += 1
-
-            if model is not None and not no_retrain and behaviors_since_last_train >= TRAIN_EVERY:
+            if model is not None and not no_retrain and samples_since_last_train >= TRAIN_EVERY:
                 from dl.trainer import compute_misprediction_rate, save_checkpoint, train
-                recent_samples = training_buffer[-TRAIN_EVERY:]
+                training_samples = list(training_buffer)
+                recent_samples = training_samples[-TRAIN_EVERY:]
                 misprediction_rate = compute_misprediction_rate(
                     model, recent_samples, scheduler.device
                 )
-                print(f"[DL] Training on {len(training_buffer)} samples... (misprediction_rate={misprediction_rate:.3f})")
+                print(f"[DL] Training on {len(training_samples)} mixed samples... (misprediction_rate={misprediction_rate:.3f})")
                 training_started_at = time.time()
                 loss = train(
                     model,
-                    training_buffer,
+                    training_samples,
                     epochs=5,
                     device=scheduler.device,
                     optimizer=model._optimizer,
                     fixed_lr=fixed_lr,
                 )
-                scheduler.record_training(len(training_buffer), loss)
+                scheduler.record_training(len(training_samples), loss)
                 dl_training_rounds_this_run += 1
                 current_metadata = _json_safe_metadata(scheduler.export_runtime_metadata())
                 metrics.record_dl_training_event(
@@ -1158,7 +1333,8 @@ def fuzz(
                         "relative_time_sec": round(time.time() - start, 3),
                         "duration_sec": round(time.time() - training_started_at, 3),
                         "exec_count": exec_count,
-                        "buffer_size": len(training_buffer),
+                        "buffer_size": len(training_samples),
+                        "buffer_kind": "mixed_rolling",
                         "behaviors_seen": coverage.edge_count,
                         "loss": loss,
                         "misprediction_rate": misprediction_rate,
@@ -1172,7 +1348,56 @@ def fuzz(
                     metadata=scheduler.export_runtime_metadata(),
                 )
                 print(f"[DL] Training done. Loss={loss:.4f}")
-                behaviors_since_last_train = 0
+                samples_since_last_train = 0
+
+        elif (
+            added_training_sample
+            and model is not None
+            and not no_retrain
+            and samples_since_last_train >= TRAIN_EVERY
+        ):
+            from dl.trainer import compute_misprediction_rate, save_checkpoint, train
+            training_samples = list(training_buffer)
+            recent_samples = training_samples[-TRAIN_EVERY:]
+            misprediction_rate = compute_misprediction_rate(
+                model, recent_samples, scheduler.device
+            )
+            print(f"[DL] Training on {len(training_samples)} mixed samples... (misprediction_rate={misprediction_rate:.3f})")
+            training_started_at = time.time()
+            loss = train(
+                model,
+                training_samples,
+                epochs=5,
+                device=scheduler.device,
+                optimizer=model._optimizer,
+                fixed_lr=fixed_lr,
+            )
+            scheduler.record_training(len(training_samples), loss)
+            dl_training_rounds_this_run += 1
+            current_metadata = _json_safe_metadata(scheduler.export_runtime_metadata())
+            metrics.record_dl_training_event(
+                {
+                    "round": dl_training_rounds_this_run,
+                    "event": "periodic",
+                    "relative_time_sec": round(time.time() - start, 3),
+                    "duration_sec": round(time.time() - training_started_at, 3),
+                    "exec_count": exec_count,
+                    "buffer_size": len(training_samples),
+                    "buffer_kind": "mixed_rolling",
+                    "behaviors_seen": coverage.edge_count,
+                    "loss": loss,
+                    "misprediction_rate": misprediction_rate,
+                    "device": getattr(scheduler, "device", None),
+                    "metadata": current_metadata,
+                }
+            )
+            save_checkpoint(
+                model,
+                _checkpoint_key(target, run_id),
+                metadata=scheduler.export_runtime_metadata(),
+            )
+            print(f"[DL] Training done. Loss={loss:.4f}")
+            samples_since_last_train = 0
 
         elif result.is_interesting:
             bug_label = result.bug_type
@@ -1185,20 +1410,21 @@ def fuzz(
 
     if model is not None and not no_retrain and training_buffer:
         from dl.trainer import compute_misprediction_rate, save_checkpoint, train
+        training_samples = list(training_buffer)
         misprediction_rate = compute_misprediction_rate(
-            model, training_buffer[-TRAIN_EVERY:], scheduler.device
+            model, training_samples[-TRAIN_EVERY:], scheduler.device
         )
-        print(f"[DL] Final training on {len(training_buffer)} samples... (misprediction_rate={misprediction_rate:.3f})")
+        print(f"[DL] Final training on {len(training_samples)} mixed samples... (misprediction_rate={misprediction_rate:.3f})")
         training_started_at = time.time()
         loss = train(
             model,
-            training_buffer,
+            training_samples,
             epochs=5,
             device=scheduler.device,
             optimizer=model._optimizer,
             fixed_lr=fixed_lr,
         )
-        scheduler.record_training(len(training_buffer), loss)
+        scheduler.record_training(len(training_samples), loss)
         dl_training_rounds_this_run += 1
         current_metadata = _json_safe_metadata(scheduler.export_runtime_metadata())
         metrics.record_dl_training_event(
@@ -1208,7 +1434,8 @@ def fuzz(
                 "relative_time_sec": round(time.time() - start, 3),
                 "duration_sec": round(time.time() - training_started_at, 3),
                 "exec_count": exec_count,
-                "buffer_size": len(training_buffer),
+                "buffer_size": len(training_samples),
+                "buffer_kind": "mixed_rolling",
                 "behaviors_seen": coverage.edge_count,
                 "loss": loss,
                 "misprediction_rate": misprediction_rate,

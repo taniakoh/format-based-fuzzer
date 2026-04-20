@@ -26,12 +26,14 @@ log it at startup.
 from __future__ import annotations
 
 import ast
+import csv
 import hashlib
 import os
 import re
 import signal
 import subprocess
 import sys
+import threading
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -69,9 +71,14 @@ _FRIDA_AGENT_SOURCE = r"""
 const targetPath = %TARGET_PATH%;
 const targetName = %TARGET_NAME%;
 const BITMAP_SIZE = 65536;
-const batchSize = 512;
+const batchSize = 4096;
+const rescanIntervalMs = 50;
+const flushIntervalMs = 100;
 let edgeBuffer = [];
 let prevLoc = 0;
+const seenSlots = new Set();
+const followedThreads = new Set();
+let lastThreadIdsKey = null;
 
 function matchesTargetModule(module) {
   if (module.path === targetPath)
@@ -94,9 +101,26 @@ function flushEdges() {
 }
 
 function recordEdge(slot) {
+  if (seenSlots.has(slot))
+    return;
+  seenSlots.add(slot);
   edgeBuffer.push(slot);
   if (edgeBuffer.length >= batchSize)
     flushEdges();
+}
+
+function drainEvents(trigger) {
+  try {
+    Stalker.flush();
+  } catch (e) {
+    send({
+      type: "debug",
+      event: "flush-error",
+      trigger: trigger,
+      error: String(e)
+    });
+  }
+  flushEdges();
 }
 
 const modules = Process.enumerateModules();
@@ -116,6 +140,13 @@ modules.forEach(module => {
 });
 
 function startFollowing(threadId) {
+  if (followedThreads.has(threadId))
+    return false;
+  send({
+    type: "debug",
+    event: "follow-thread-attempt",
+    threadId: threadId
+  });
   Stalker.follow(threadId, {
     events: {
       call: false,
@@ -125,15 +156,7 @@ function startFollowing(threadId) {
       compile: false
     },
     onReceive(events) {
-      send({
-        type: "debug",
-        event: "stalker-batch",
-        byteLength: events.byteLength || 0
-      });
-      const parsed = Stalker.parse(events, {
-        annotate: true,
-        stringify: true
-      });
+      const parsed = Stalker.parse(events);
 
       parsed.forEach(event => {
         if (!Array.isArray(event) || event.length < 2)
@@ -150,36 +173,91 @@ function startFollowing(threadId) {
       });
     }
   });
+  followedThreads.add(threadId);
+  return true;
 }
 
-const threads = Process.enumerateThreads();
-send({
-  type: "debug",
-  event: "thread-scan",
-  threadCount: threads.length,
-  threadIds: threads.map(thread => thread.id)
-});
-
-threads.forEach(thread => {
-  try {
-    startFollowing(thread.id);
+function scanAndFollowThreads(trigger) {
+  const threads = Process.enumerateThreads();
+  const threadIds = threads.map(thread => thread.id);
+  const threadIdsKey = JSON.stringify(threadIds);
+  if (threadIdsKey !== lastThreadIdsKey) {
+    lastThreadIdsKey = threadIdsKey;
     send({
       type: "debug",
-      event: "follow-thread",
-      threadId: thread.id
-    });
-  } catch (e) {
-    send({
-      type: "debug",
-      event: "follow-thread-error",
-      threadId: thread.id,
-      error: String(e)
+      event: "thread-scan",
+      trigger: trigger,
+      threadCount: threads.length,
+      threadIds: threadIds
     });
   }
-});
+
+  threads.forEach(thread => {
+    try {
+      const started = startFollowing(thread.id);
+      if (started) {
+        send({
+          type: "debug",
+          event: "follow-thread",
+          threadId: thread.id,
+          trigger: trigger
+        });
+      } else if (trigger === "post-load") {
+        send({
+          type: "debug",
+          event: "follow-thread-skipped",
+          threadId: thread.id,
+          trigger: trigger,
+          reason: "already-followed"
+        });
+      }
+    } catch (e) {
+      send({
+        type: "debug",
+        event: "follow-thread-error",
+        threadId: thread.id,
+        trigger: trigger,
+        error: String(e)
+      });
+    }
+  });
+}
+
+setTimeout(function () {
+  scanAndFollowThreads("post-load");
+}, 0);
+
+setInterval(function () {
+  scanAndFollowThreads("interval");
+}, rescanIntervalMs);
+
+setInterval(function () {
+  drainEvents("interval");
+}, flushIntervalMs);
 
 rpc.exports.flush = function () {
-  flushEdges();
+  drainEvents("rpc");
+  send({
+    type: "debug",
+    event: "flush-summary",
+    trigger: "rpc",
+    followedThreads: Array.from(followedThreads.values()),
+    bufferedEdges: edgeBuffer.length,
+    uniqueSlots: seenSlots.size
+  });
+  return true;
+};
+
+rpc.exports.dispose = function () {
+  drainEvents("dispose");
+  send({
+    type: "debug",
+    event: "flush-summary",
+    trigger: "dispose",
+    followedThreads: Array.from(followedThreads.values()),
+    bufferedEdges: edgeBuffer.length,
+    uniqueSlots: seenSlots.size
+  });
   return true;
 };
 """
@@ -290,6 +368,8 @@ _INSTRUMENTATION_NOISE_PATTERNS = (
     "loader crashed",
     "process not found",
     "the connection is closed",
+    "agent connection closed unexpectedly",
+    "timed out while waiting for stop from process",
     "unexpected crash while trying to allocate memory",
 )
 
@@ -314,6 +394,7 @@ class RunResult:
     parser_reported_exc_type: str = ""
     parser_reported_filename: str = ""
     parser_reported_lineno: int | None = None
+    force_instrumentation_noise: bool = False
 
     @property
     def is_interesting(self) -> bool:
@@ -329,7 +410,9 @@ class RunResult:
 
     @property
     def is_instrumentation_noise(self) -> bool:
-        return self.bug_type == BugType.CRASH and _is_instrumentation_noise_message(self.exception_msg)
+        return self.force_instrumentation_noise or (
+            self.bug_type == BugType.CRASH and _is_instrumentation_noise_message(self.exception_msg)
+        )
 
     @property
     def is_real_bug(self) -> bool:
@@ -373,6 +456,72 @@ def _normalize_parser_bug_kind(kind: str) -> str:
     if normalized == "functional":
         return BugType.FUNCTIONAL
     return normalized
+
+
+def _bug_counts_csv_path(cwd: Path) -> Path:
+    return cwd / "logs" / "bug_counts.csv"
+
+
+def _read_bug_count_snapshot(csv_path: Path) -> dict[tuple[str, str, str, str, str], int]:
+    if not csv_path.exists():
+        return {}
+
+    snapshot: dict[tuple[str, str, str, str, str], int] = {}
+    try:
+        with open(csv_path, "r", encoding="utf-8", newline="") as f:
+            for row in csv.DictReader(f):
+                key = (
+                    str(row.get("bug_type", "") or ""),
+                    str(row.get("exc_type", "") or ""),
+                    str(row.get("exc_message", "") or ""),
+                    str(row.get("filename", "") or ""),
+                    str(row.get("lineno", "") or ""),
+                )
+                try:
+                    snapshot[key] = int(row.get("count", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+    except OSError:
+        return {}
+    return snapshot
+
+
+def _parser_reported_bug_from_csv_delta(
+    before: dict[tuple[str, str, str, str, str], int],
+    after: dict[tuple[str, str, str, str, str], int],
+) -> dict[str, object]:
+    candidates: list[tuple[int, tuple[str, str, str, str, str]]] = []
+    for key, after_count in after.items():
+        delta = after_count - before.get(key, 0)
+        if delta > 0:
+            candidates.append((delta, key))
+
+    if not candidates:
+        return {"kind": None, "message": "", "exc_type": "", "filename": "", "lineno": None}
+
+    _, best_key = max(
+        candidates,
+        key=lambda item: (
+            item[0],
+            item[1][0],
+            item[1][3],
+            item[1][4],
+            item[1][1],
+            item[1][2],
+        ),
+    )
+    bug_type, exc_type, exc_message, filename, lineno_text = best_key
+    try:
+        lineno = int(lineno_text) if str(lineno_text).strip() else None
+    except ValueError:
+        lineno = None
+    return {
+        "kind": _normalize_parser_bug_kind(bug_type),
+        "message": exc_message,
+        "exc_type": exc_type,
+        "filename": filename,
+        "lineno": lineno,
+    }
 
 
 def _parser_reported_bug(stdout: str) -> dict[str, object]:
@@ -619,6 +768,11 @@ class Executor:
         frida = _load_frida()
         cmd = [str(self.binary), *self._fixed_args, f"{self._input_arg}={input_str}"]
         edge_slots: list[int] = []
+        bug_counts_before = _read_bug_count_snapshot(_bug_counts_csv_path(self._cwd))
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+        detached_event = threading.Event()
+        detached_info: dict[str, object] = {"reason": "", "details": []}
 
         def on_message(message: dict[str, Any], _data: bytes | None) -> None:
             msg_type = message.get("type")
@@ -629,25 +783,48 @@ class Executor:
             if payload.get("type") == "edges":
                 new_edges = [int(s) for s in payload.get("edges", [])]
                 edge_slots.extend(new_edges)
-                _frida_debug(
-                    f"received {len(new_edges)} edge slots (total={len(edge_slots)})"
-                )
             elif payload.get("type") == "debug":
                 _frida_debug(f"agent debug: {payload}")
 
-        popen_kwargs: dict[str, Any] = {
-            "args": cmd,
-            "stdin": subprocess.DEVNULL,
-            "stdout": subprocess.PIPE,
-            "stderr": subprocess.PIPE,
-            "text": True,
-            "errors": "replace",
-            "cwd": self._cwd,
-        }
+        device = frida.get_local_device()
+        pid: int | None = None
+
+        def on_output(*args: object) -> None:
+            if len(args) < 3:
+                _frida_debug(f"unexpected output callback args={args!r}")
+                return
+            out_pid = int(args[0])
+            fd = int(args[1])
+            data = args[2]
+            if pid is None or out_pid != pid:
+                return
+            if isinstance(data, bytes):
+                text = data.decode("utf-8", errors="replace")
+            else:
+                text = str(data)
+            if fd == 1:
+                stdout_chunks.append(text)
+            elif fd == 2:
+                stderr_chunks.append(text)
+            else:
+                _frida_debug(f"received output on fd={fd}: {text!r}")
+
+        def on_detached(*args: object) -> None:
+            reason = str(args[0]) if args else ""
+            detached_info["reason"] = reason
+            detached_info["details"] = list(args[1:])
+            _frida_debug(f"session detached reason={reason!r} details={args[1:]!r}")
+            detached_event.set()
 
         try:
-            proc = subprocess.Popen(**popen_kwargs)
-            _frida_debug(f"spawned pid={proc.pid} cmd={cmd!r}")
+            device.on("output", on_output)
+            pid = device.spawn(
+                str(self.binary),
+                argv=cmd,
+                cwd=str(self._cwd),
+                stdio="pipe",
+            )
+            _frida_debug(f"spawned suspended pid={pid} cmd={cmd!r}")
         except Exception as exc:
             result = RunResult(
                 input_str=input_str,
@@ -662,51 +839,52 @@ class Executor:
         session = None
         script = None
         try:
-            session = frida.get_local_device().attach(proc.pid)
-            _frida_debug(f"attached to pid={proc.pid}")
+            session = device.attach(pid)
+            session.on("detached", on_detached)
+            _frida_debug(f"attached to pid={pid}")
             script = session.create_script(_frida_agent_source(self.binary))
             _frida_debug(f"created script for binary={self.binary}")
             script.on("message", on_message)
             script.load()
             _frida_debug("script loaded")
+            device.resume(pid)
+            _frida_debug(f"resumed pid={pid}")
 
-            try:
-                stdout, stderr = proc.communicate(timeout=self.timeout)
-                _frida_debug(
-                    f"process exited rc={proc.returncode} stdout_len={len(stdout or '')} "
-                    f"stderr_len={len(stderr or '')}"
-                )
-            except subprocess.TimeoutExpired:
-                proc.kill()
+            if not detached_event.wait(self.timeout):
                 try:
-                    stdout, stderr = proc.communicate(timeout=5)
-                except subprocess.TimeoutExpired:
-                    stdout, stderr = "", ""
+                    device.kill(pid)
+                except Exception:
+                    pass
+                if not detached_event.wait(5):
+                    detached_info["reason"] = "timeout"
                 _frida_debug(
-                    f"process timeout pid={proc.pid} partial_edges={len(edge_slots)}"
+                    f"process timeout pid={pid} partial_edges={len(edge_slots)}"
                 )
+                stdout = "".join(stdout_chunks)
+                stderr = "".join(stderr_chunks)
                 result = RunResult(
                     input_str=input_str,
                     bug_type=BugType.TIMEOUT,
                     exit_code=None,
-                    stdout=stdout or "",
-                    stderr=stderr or "",
+                    stdout=stdout,
+                    stderr=stderr,
                     exception_msg="Process timed out",
                 )
                 return _edge_slots_to_bitmap(edge_slots), True, result
 
-            if script is not None:
-                try:
-                    script.exports_sync.flush()
-                    _frida_debug(f"flush completed; total edge slots={len(edge_slots)}")
-                except Exception:
-                    _frida_debug("flush failed")
-                    pass
+            stdout = "".join(stdout_chunks)
+            stderr = "".join(stderr_chunks)
+            _frida_debug(
+                f"process detached reason={detached_info['reason']!r} "
+                f"stdout_len={len(stdout)} stderr_len={len(stderr)} "
+                f"edge_slots={len(edge_slots)}"
+            )
 
-            exc_msg, tb = _parse_output(stdout or "", stderr or "")
-            if proc.returncode not in (0, 1):
+            exc_msg, tb = _parse_output(stdout, stderr)
+            detach_reason = str(detached_info.get("reason", "") or "")
+            if detach_reason not in ("", "process-terminated"):
                 bug_type = BugType.CRASH
-                exc_msg = _summarize_process_failure(stdout or "", stderr or "", proc.returncode)
+                exc_msg = exc_msg or f"Frida detach reason: {detach_reason}"
             elif _traceback_exception_type(tb) == "PerformanceBug":
                 bug_type = BugType.PERFORMANCE
             else:
@@ -715,13 +893,18 @@ class Executor:
             result = RunResult(
                 input_str=input_str,
                 bug_type=bug_type,
-                exit_code=proc.returncode,
-                stdout=stdout or "",
-                stderr=stderr or "",
+                exit_code=None,
+                stdout=stdout,
+                stderr=stderr,
                 exception_msg=exc_msg,
                 traceback=tb,
             )
-            parser_bug = _parser_reported_bug(result.stdout)
+            parser_bug = _parser_reported_bug_from_csv_delta(
+                bug_counts_before,
+                _read_bug_count_snapshot(_bug_counts_csv_path(self._cwd)),
+            )
+            if parser_bug["kind"] is None:
+                parser_bug = _parser_reported_bug(result.stdout)
             result.parser_reported_bug_type = parser_bug["kind"]
             result.parser_reported_message = str(parser_bug["message"])
             result.parser_reported_exc_type = str(parser_bug["exc_type"])
@@ -733,8 +916,8 @@ class Executor:
         except Exception as exc:
             _frida_debug(f"Frida execution failed: {exc!r}")
             try:
-                proc.kill()
-                proc.communicate(timeout=5)
+                if pid is not None:
+                    device.kill(pid)
             except Exception:
                 pass
             result = RunResult(
@@ -747,19 +930,25 @@ class Executor:
             )
             return bytes(BITMAP_SIZE), True, result
         finally:
-            if script is not None:
-                try:
-                    script.unload()
-                except Exception:
-                    pass
-            if session is not None:
-                try:
-                    session.detach()
-                except Exception:
-                    pass
+            try:
+                device.off("output", on_output)
+            except Exception:
+                pass
+            if not detached_event.is_set():
+                if script is not None:
+                    try:
+                        script.unload()
+                    except Exception:
+                        pass
+                if session is not None:
+                    try:
+                        session.detach()
+                    except Exception:
+                        pass
 
     def _run_binary(self, input_str: str) -> RunResult:
         cmd = [str(self.binary), *self._fixed_args, f"{self._input_arg}={input_str}"]
+        bug_counts_before = _read_bug_count_snapshot(_bug_counts_csv_path(self._cwd))
         try:
             proc = subprocess.run(
                 cmd,
@@ -810,7 +999,12 @@ class Executor:
             exception_msg=exc_msg,
             traceback=tb,
         )
-        parser_bug = _parser_reported_bug(stdout)
+        parser_bug = _parser_reported_bug_from_csv_delta(
+            bug_counts_before,
+            _read_bug_count_snapshot(_bug_counts_csv_path(self._cwd)),
+        )
+        if parser_bug["kind"] is None:
+            parser_bug = _parser_reported_bug(stdout)
         result.parser_reported_bug_type = parser_bug["kind"]
         result.parser_reported_message = str(parser_bug["message"])
         result.parser_reported_exc_type = str(parser_bug["exc_type"])

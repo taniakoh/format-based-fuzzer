@@ -133,6 +133,40 @@ class IPv4SeedGenerator(SeedGenerator):
 
     BOUNDARY_OCTETS = [0, 1, 9, 10, 99, 100, 127, 128, 199, 200, 254, 255]
     OVERFLOW_OCTETS = [256, 300, 999]
+    CURATED_VALID = [
+        "0.0.0.0",
+        "1.2.3.4",
+        "10.0.0.1",
+        "10.10.10.10",
+        "99.100.127.128",
+        "127.0.0.1",
+        "169.254.0.1",
+        "172.16.0.1",
+        "192.168.0.1",
+        "223.255.255.254",
+        "224.0.0.1",
+        "239.255.255.250",
+        "255.255.255.255",
+        "001.002.003.004",
+        "010.000.000.001",
+    ]
+    CURATED_INVALID = [
+        "",
+        "1.2.3",
+        "1.2.3.4.5",
+        ".1.2.3.4",
+        "1.2.3.4.",
+        "1.2..4",
+        "256.0.0.1",
+        "1.2.3.999",
+        "-1.2.3.4",
+        "1.2.3.-4",
+        "1,2,3,4",
+        "1 .2.3.4",
+        "1.2.3. 4",
+        "1.2.3.a",
+        "0x1.2.3.4",
+    ]
 
     # Invalid structural templates — wrong octet count, out-of-range, bad separators
     INVALID_TEMPLATES = [
@@ -164,6 +198,23 @@ class IPv4SeedGenerator(SeedGenerator):
         ]
         return ".".join(parts).encode()
 
+    def generate_corpus(self, n: int = 100) -> list[bytes]:
+        seeds = load_seed_inputs(self._target_name(), allow_bootstrap=False)
+        curated = [entry.encode() for entry in self.CURATED_VALID + self.CURATED_INVALID]
+        random.shuffle(curated)
+        seen = set(seeds)
+        for entry in curated:
+            if entry not in seen:
+                seeds.append(entry)
+                seen.add(entry)
+        while len(seeds) < n:
+            candidate = self.generate()
+            if candidate in seen:
+                continue
+            seeds.append(candidate)
+            seen.add(candidate)
+        return seeds[:n]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  IPv6
@@ -174,6 +225,43 @@ class IPv6SeedGenerator(SeedGenerator):
     """Generates a mix of valid and structured-invalid IPv6 address strings."""
 
     BOUNDARY_GROUPS = ["0", "1", "ff", "fe", "ffff", "0001", "dead", "beef", "db8"]
+    CURATED_VALID = [
+        "::",
+        "::1",
+        "2001:db8::1",
+        "2001:db8:0:1::1",
+        "fe80::1",
+        "fe80::abcd:1",
+        "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+        "2001:db8::192.0.2.33",
+        "::192.0.2.1",
+        "1234:5678:9abc:def0:1111:2222:3333:4444",
+        "0001:0002:0003:0004:0005:0006:0007:0008",
+    ]
+    CURATED_INVALID = [
+        "",
+        ":1:2:3:4:5:6:7",
+        "1:2:3:4:5:6:7:8:",
+        "1:2:3:4:5:6:7",
+        "1:2:3:4:5:6:7:8:9",
+        "1::2::3",
+        "fffff::1",
+        "1:2:3:4:5:6:7:gggg",
+        "2001-db8::1",
+        "2001:db8:::1",
+        "::ffff:192.0.2.999",
+        "12345::",
+        ":::",
+        "1:::2",
+        "::::",
+        "::fffff:192.0.2.33",
+        "2001:db8::1::",
+        "2001:db8::1:",
+        "2001::db8::1",
+        "fffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+        "1:2:3:4:5:6:7:8:9:a",
+        "1:2:3:4:5:6:7::8:9",
+    ]
 
     VALID_TEMPLATES = [
         "{g}:{g}:{g}:{g}:{g}:{g}:{g}:{g}",   # full 8-group
@@ -191,6 +279,9 @@ class IPv6SeedGenerator(SeedGenerator):
         "{g}:{g}:{g}:{g}:{g}:{g}:{g}:{g}:{g}", # too many groups
         "{g}:{g}:{g}:{g}:{g}:{g}:{g}",          # too few groups, no ::
         "{g}::{g}::{g}",                          # multiple double-colons
+        "{g}:::{g}",                              # triple-colon defect
+        "::{g}::{g}",                             # leading double-colon plus extra compression
+        "{g}::{g}:{g}:{g}:{g}:{g}:{g}:{g}",      # compressed plus too many groups
         "{g}:{g}:{g}:{g}:{g}:{g}:{g}:{g}:",      # trailing colon
         ":{g}:{g}:{g}:{g}:{g}:{g}:{g}:{g}",      # leading single colon
         "{g5}:{g}:{g}:{g}:{g}:{g}:{g}:{g}",      # 5-hex-digit group (overlong)
@@ -205,7 +296,7 @@ class IPv6SeedGenerator(SeedGenerator):
         return random.choice(["fffff", "10000", "1ffff", "abcde"])
 
     def generate(self) -> bytes:
-        if random.random() < 0.3:
+        if random.random() < 0.4:
             tmpl = random.choice(self.INVALID_TEMPLATES)
             addr = tmpl.format(g=self._group(), g5=self._group5())
         else:
@@ -216,7 +307,32 @@ class IPv6SeedGenerator(SeedGenerator):
                 ipv4_suffix = ".".join(str(random.randint(0, 255)) for _ in range(4))
                 parts = addr.rsplit(":", 1)
                 addr = parts[0] + ":" + ipv4_suffix
+            # Keep near-valid malformed compressed forms in circulation.
+            elif random.random() < 0.2:
+                addr = random.choice([
+                    addr.replace("::", ":::", 1) if "::" in addr else addr + "::",
+                    f"{addr}:",
+                    f"{addr}::",
+                    f"{addr}:{self._group()}",
+                ])
         return addr.encode()
+
+    def generate_corpus(self, n: int = 100) -> list[bytes]:
+        seeds = load_seed_inputs(self._target_name(), allow_bootstrap=False)
+        curated = [entry.encode() for entry in self.CURATED_VALID + self.CURATED_INVALID]
+        random.shuffle(curated)
+        seen = set(seeds)
+        for entry in curated:
+            if entry not in seen:
+                seeds.append(entry)
+                seen.add(entry)
+        while len(seeds) < n:
+            candidate = self.generate()
+            if candidate in seen:
+                continue
+            seeds.append(candidate)
+            seen.add(candidate)
+        return seeds[:n]
 
 
 @SeedGenerator.register("json")

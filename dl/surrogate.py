@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from collections import deque
 
-from fuzzer.scheduler import MutationPayoffTracker
+from fuzzer.scheduler import AdaptiveStructureRegulator, MutationPayoffTracker
 
 
 def get_device() -> str:
@@ -41,17 +41,19 @@ try:
         Output : predicted coverage (COV_DIM sigmoid values) + confidence scalar
         """
 
-        MAX_LEN = 64
-        COV_DIM = 128
+        MAX_LEN = 128
+        COV_DIM = 256
 
         def __init__(self):
             super().__init__()
             self.embed = nn.Embedding(256, 8)
             self.encoder = nn.Sequential(
                 nn.Flatten(),
-                nn.Linear(self.MAX_LEN * 8, 512),
+                nn.Linear(self.MAX_LEN * 8, 768),
                 nn.ReLU(),
-                nn.Linear(512, 256),
+                nn.Linear(768, 384),
+                nn.ReLU(),
+                nn.Linear(384, 256),
                 nn.ReLU(),
             )
             self.coverage_head = nn.Linear(256, self.COV_DIM)
@@ -116,6 +118,8 @@ class DLScheduler:
     MAX_GUIDED_BLEND = 0.85
     MIN_GUIDED_BLEND = 0.15
     BOOSTED_PRIORITY_SCALE = 0.75
+    FAMILY_GUIDANCE_BOOST = 0.20
+    FAMILY_UNDERPERFORM_MARGIN = 0.35
 
     def __init__(
         self,
@@ -133,6 +137,7 @@ class DLScheduler:
         self.training_rounds = 0
         self.last_training_loss: float | None = None
         self._recent_results: deque[tuple[str, bool]] = deque(maxlen=self.RECENT_WINDOW)
+        self.structure_regulator = AdaptiveStructureRegulator()
         self._last_plan = self._make_static_plan(b"")
         if hasattr(self.model, "to"):
             self.model.to(self.device)
@@ -184,6 +189,19 @@ class DLScheduler:
         self.training_rounds += 1
         self.last_training_loss = loss
 
+    def record_execution_feedback(
+        self,
+        *,
+        result,
+        bug_site_key: str,
+        is_new: bool,
+    ) -> dict[str, float]:
+        return self.structure_regulator.observe(
+            bug_type=str(getattr(result, "bug_type", "") or ""),
+            bug_site_key=bug_site_key,
+            is_new=is_new,
+        )
+
     def load_runtime_metadata(self, metadata: dict | None) -> None:
         if not metadata:
             return
@@ -230,9 +248,10 @@ class DLScheduler:
             "blend": 0.0,
             "reason": "fallback",
         })
-        return plan
+        return self.structure_regulator.adjust_plan(plan)
 
     def _make_plan(self, seed: bytes, confidence_score: float) -> dict[str, object]:
+        seed_family = self.payoff_tracker.describe_seed_family(seed)
         if not self.trust_gate(confidence_score):
             return self._static_reason(seed, "low_confidence", confidence_score)
 
@@ -247,9 +266,12 @@ class DLScheduler:
             return self._static_reason(seed, "recent_underperformance", confidence_score)
 
         confidence_factor = self._confidence_factor(confidence_score)
+        family_factor = self._family_guidance_factor(seed_family)
+        if family_factor <= 0.0:
+            return self._static_reason(seed, "family_underperformance", confidence_score)
         blend = min(
             self.MAX_GUIDED_BLEND,
-            max(self.MIN_GUIDED_BLEND, confidence_factor * recent_factor),
+            max(self.MIN_GUIDED_BLEND, confidence_factor * recent_factor * family_factor),
         )
         plan = self.payoff_tracker.plan(seed, base_blend=blend)
         plan.update({
@@ -257,8 +279,14 @@ class DLScheduler:
             "confidence": confidence_score,
             "blend": blend,
             "reason": "hybrid_guidance",
+            "seed_family_score": round(
+                self.payoff_tracker._score(  # noqa: SLF001
+                    self.payoff_tracker.seed_family_stats.get(seed_family)
+                ),
+                4,
+            ),
         })
-        return plan
+        return self.structure_regulator.adjust_plan(plan)
 
     def _static_reason(
         self,
@@ -273,7 +301,7 @@ class DLScheduler:
             "blend": 0.0,
             "reason": reason,
         })
-        return plan
+        return self.structure_regulator.adjust_plan(plan)
 
     def _recent_performance_factor(self) -> float:
         guided = [hit for mode, hit in self._recent_results if mode == "guided"]
@@ -300,3 +328,13 @@ class DLScheduler:
             return 0.0
         span = max(1e-6, 1.0 - threshold)
         return min(1.0, (confidence_score - threshold) / span)
+
+    def _family_guidance_factor(self, seed_family: str) -> float:
+        family_score = self.payoff_tracker._score(  # noqa: SLF001
+            self.payoff_tracker.seed_family_stats.get(seed_family)
+        )
+        if family_score < (self.payoff_tracker.PRIOR_SCORE - self.FAMILY_UNDERPERFORM_MARGIN):
+            return 0.0
+        delta = family_score - self.payoff_tracker.PRIOR_SCORE
+        factor = 1.0 + ((delta / 0.5) * self.FAMILY_GUIDANCE_BOOST)
+        return min(1.25, max(0.65, factor))

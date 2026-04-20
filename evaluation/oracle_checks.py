@@ -20,7 +20,7 @@ from fuzzer.executor import (
     BugType,
     Executor,
     RunResult,
-    _hash_block_addresses_to_bitmap,
+    _edge_slots_to_bitmap,
     _result_to_bitmap,
 )
 from fuzzer.oracle import evaluate_target_input
@@ -143,26 +143,40 @@ def _run_frida_coverage_checks() -> None:
 
     first_hit = bytearray(BITMAP_SIZE)
     first_hit[7] = 1
-    assert coverage.is_interesting(bytes(first_hit)) is True
+    first_obs = coverage.observe(bytes(first_hit))
+    assert first_obs["is_interesting"] is True
+    assert first_obs["rarity_score"] > 0.0
     assert coverage.edge_count == 1
 
     same_bucket = bytearray(BITMAP_SIZE)
     same_bucket[7] = 1
-    assert coverage.is_interesting(bytes(same_bucket)) is False
+    same_obs = coverage.observe(bytes(same_bucket))
+    assert same_obs["is_interesting"] is False
+    assert same_obs["rarity_score"] < first_obs["rarity_score"]
     assert coverage.edge_count == 1
 
     new_count_bucket = bytearray(BITMAP_SIZE)
     new_count_bucket[7] = 3
-    assert coverage.is_interesting(bytes(new_count_bucket)) is True
-    assert coverage.edge_count == 1
+    bucket_obs = coverage.observe(bytes(new_count_bucket))
+    assert bucket_obs["is_interesting"] is True
+    assert coverage.edge_count == 2
 
     new_edge = bytearray(BITMAP_SIZE)
     new_edge[9] = 1
-    assert coverage.is_interesting(bytes(new_edge)) is True
-    assert coverage.edge_count == 2
+    edge_obs = coverage.observe(bytes(new_edge))
+    assert edge_obs["is_interesting"] is True
+    assert edge_obs["new_slots"] == 1
+    assert coverage.edge_count == 3
 
-    bitmap = _hash_block_addresses_to_bitmap(["0x1000", "0x1000", "0x2000"])
+    bitmap = _edge_slots_to_bitmap([0x1000, 0x1000, 0x2000])
     assert bitmap.count(0) < len(bitmap), "expected hashed block coverage"
+
+
+def _run_frida_agent_flush_checks() -> None:
+    source = executor_mod._frida_agent_source(Path("/tmp/linux-ipv4-parser"))
+    assert "Stalker.flush();" in source, "agent should force pending stalker events out of Frida buffers"
+    assert "rpc.exports.dispose" in source, "agent should flush buffered edges during teardown"
+    assert 'trigger: "dispose"' in source, "teardown flush should be observable in debug logs"
 
 
 def _run_frida_mode_selection_checks() -> None:
@@ -223,6 +237,7 @@ def main() -> None:
     _run_family_variation_checks()
     _run_executor_integration_checks()
     _run_frida_coverage_checks()
+    _run_frida_agent_flush_checks()
     _run_frida_mode_selection_checks()
     _run_missing_frida_checks()
     print("oracle checks passed")

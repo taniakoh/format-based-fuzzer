@@ -18,7 +18,75 @@ Key files changed:
 - ...
 ```
 
+## 2026-04-20
+
+### Align progress graph bug counts with parser-site dedup
+Improvements:
+- Changed `plot_data` so the graphed `unique_bugs` series records parser-site deduplicated bug sites, matching the logic used in `logs/bug_counts.csv`.
+- Renamed the SVG panel label from `Unique bugs` to `Unique bug sites` so the chart reflects the broader parser-site count it now shows.
+
+Reasons:
+- The previous graph used the narrower real-bug dedup metric, which made runs like IPv4 look inconsistent against `bug_counts.csv` even though both outputs were individually correct under different rules.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
+- `evaluation/plot_progress.py`
+- `codefix.md`
+
+## 2026-04-20
+
+### Flush Frida coverage before teardown
+Improvements:
+- Updated the Frida Stalker agent to flush buffered events periodically and again during `dispose()` so short-lived parser runs still emit edge coverage before the session detaches.
+- Removed the unreachable host-side post-detach flush branch and covered the new agent flush hooks with a regression check.
+
+Reasons:
+- Frida runs were successfully following target threads but still finishing with `edge_slots=0`, which strongly indicated buffered coverage was being lost during teardown.
+
+Key files changed:
+- `fuzzer/executor.py`
+- `evaluation/oracle_checks.py`
+- `codefix.md`
+
 ## 2026-04-15
+
+### Confirm Frida crashes with hash-mode replay
+Improvements:
+- Added a metrics-time confirmation step that replays Frida-reported `CRASH` and `TIMEOUT` inputs through the non-Frida `hash` executor before counting them as real crashes.
+- Marked Frida-only crash records as instrumentation noise when the same input replays cleanly as a non-crashing outcome such as `invalidity` or `PASS`.
+- Saved the replay confirmation result into `bugs.jsonl` for post-run auditability.
+
+Reasons:
+- Prevents instrumentation-sensitive failures from inflating real-bug, unique-crash, and `bug_counts.csv` totals.
+- Keeps stable target crashes while suppressing false positives that disappear outside the Frida path.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
+- `fuzzer/executor.py`
+
+### Filter Frida transport failures from crash counts
+Improvements:
+- Expanded instrumentation-noise detection so Frida agent disconnects and stop-wait timeouts are excluded from aggregated crash bug counts.
+- Preserved real target signal-based crashes such as `signal 6` and `signal 11` so only Frida transport/control failures are filtered.
+
+Reasons:
+- Prevents `bug_counts.csv` from mixing Frida session failures with actual parser or target-process crashes.
+- Keeps downstream crash summaries aligned with the intent of the existing instrumentation-noise filtering.
+
+Key files changed:
+- `fuzzer/executor.py`
+
+### Use emitted bug_counts.csv as the parser bug source of truth
+Improvements:
+- Changed the binary executor to snapshot `results/<target>/logs/bug_counts.csv` before and after each target invocation and derive the parser-reported bug row from the positive count delta.
+- Made executor classification prefer that CSV-derived bug type, exception class, filename, and line number before falling back to stdout banner parsing.
+
+Reasons:
+- Keeps `bug_type` aligned with the subject binary's own recorded taxonomy instead of re-inferring it from potentially misleading stdout labels.
+- Fixes cases where the launcher printed a `validity` banner but the binary's persisted `bug_counts.csv` row classified the same failure as `invalidity`.
+
+Key files changed:
+- `fuzzer/executor.py`
 
 ### Prefer parser-reported bug kinds over crash fallback
 Improvements:
@@ -268,15 +336,15 @@ Key files changed:
 
 ## 2026-04-15
 
-### Collapse invalidity counts by bug site
+### Collapse unique bug counts by bug site
 Improvements:
-- Changed unique-bug deduplication so `invalidity` findings with the same source filename and line count as one bug even when their parser messages differ.
-- Kept exception-class-aware deduplication for non-`invalidity` bug types, preserving the more specific grouping for validity, bonus, performance, and crash-style bugs.
+- Changed unique-bug deduplication so findings with the same source filename and line count as one bug even when their parser messages or exception classes differ.
+- Added explicit `site_hit_count` values to saved unique-bug entries so each deduplicated bug still records how many times that source line was hit.
 - Updated the saved `unique_bugs.json` count definition text in both the live metrics collector and the Atheris post-processing path to match the new rule.
 
 Reasons:
-- Parser rejections from the same code site were being split into multiple unique bugs purely because the parse message text or exception flavor changed.
-- This overstated headline unique-bug totals and made `invalidity` counts disagree with the intended "same line means same bug" interpretation.
+- Repeated failures from the same code site were being split into multiple unique bugs purely because the message text or exception flavor changed.
+- This overstated headline unique-bug totals and disagreed with the intended "same line means same bug" interpretation across bug types.
 
 Key files changed:
 - `evaluation/collect_metrics.py`
@@ -305,6 +373,84 @@ Reasons:
 - On WSL, forcing `hash` should still keep execution on the native Linux binary so performance comparisons are meaningful.
 - The extra diagnostics showed that attaching while the child was stopped yielded `threadCount: 0`, so the agent had no threads to follow and never produced Stalker events.
 - Known Frida/runtime failure modes were inflating crash-centric headline metrics even though they were harness artifacts rather than target bugs.
+
+Key files changed:
+- `fuzzer/executor.py`
+- `codefix.md`
+
+## 2026-04-20
+
+### Reduce Frida edge transport volume
+Improvements:
+- Changed the Frida agent to send each edge slot at most once per execution instead of repeatedly forwarding every hit.
+- Extended the Frida flush debug summary with the total number of unique slots seen during the run.
+
+Reasons:
+- After the attach/resume fixes, the remaining instability showed up while Stalker was successfully producing very large event batches, pointing to message transport pressure between the Frida agent and Python host.
+- Coverage novelty for this fuzzer is driven primarily by edge presence, so deduplicating per-execution slot messages keeps the useful signal while sharply reducing transport load.
+
+Key files changed:
+- `fuzzer/executor.py`
+- `codefix.md`
+
+## 2026-04-20
+
+### Avoid double-cleaning detached Frida sessions
+Improvements:
+- Stopped calling Frida script flush/unload and session detach paths after the session has already reported `process-terminated`.
+- Kept output callback cleanup but skipped redundant teardown work on already-detached sessions.
+
+Reasons:
+- Coverage collection now works, so the remaining WSL-side instability is most likely in the post-detach cleanup path rather than in Stalker setup.
+- Touching an already-detached Frida session or script can trigger native cleanup races in the bindings.
+
+Key files changed:
+- `fuzzer/executor.py`
+- `codefix.md`
+
+## 2026-04-20
+
+### Split bug-count outputs into dedup and raw CSVs
+Improvements:
+- Kept `logs/bug_counts.csv` as the deduplicated parser-bug summary used by the executor and plotting code.
+- Added `logs/bug_counts_raw.csv` with one row per logged finding so post-run analysis can inspect raw bug sightings without losing event-level detail.
+- Applied the same split to Atheris post-processing so JSON-target runs now emit both CSV views too.
+
+Reasons:
+- The existing `bug_counts.csv` was useful as a unique-bug summary, but it could not answer questions about repeated sightings or per-execution bug volume.
+- Keeping the deduplicated filename stable avoids breaking parser-site delta tracking in the binary executor.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
+- `main.py`
+- `codefix.md`
+
+## 2026-04-20
+
+### Suppress Frida crash headlines on unstable backend
+Improvements:
+- Marked all Frida-mode `CRASH` and `TIMEOUT` results as untrusted for headline crash counting on this machine while still logging them to `bugs.jsonl` for debugging.
+- Added an explicit `frida_crash_untrusted` flag to saved bug entries and a summary note in `stats.txt` so post-run analysis does not accidentally treat those crash counts as authoritative.
+
+Reasons:
+- The current Frida backend is unstable in this environment and can terminate the harness or emit native runtime failures unrelated to target correctness.
+- Treating those events as trusted crash counts was overstating crash-centric results and obscuring which findings actually come from the parser.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
+- `codefix.md`
+
+## 2026-04-20
+
+### Switch Frida executor to Frida-managed spawn flow
+Improvements:
+- Reworked the Linux Frida executor to use Frida-managed `spawn -> attach -> load -> resume` instead of launching the target with `subprocess.Popen()` and racing to attach afterward.
+- Captured spawned-process stdout/stderr through Frida piped stdio and waited on session detachment rather than `communicate()`.
+- Preserved the existing parser-output and oracle classification flow on top of the new Frida lifecycle.
+
+Reasons:
+- Local Frida sanity checks succeeded when Frida owned the spawn/attach sequence, while the repo's `Popen -> attach(pid)` flow was still triggering abrupt harness exits on WSL.
+- Suspending the process before first instruction removes the attach race that was most likely causing intermittent `process not found` and early native failures.
 
 Key files changed:
 - `fuzzer/executor.py`

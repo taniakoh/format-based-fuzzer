@@ -120,20 +120,29 @@ The DL scheduler assigns a mutation energy `e(s)` to each seed `s`, controlling 
 
 ### 3.3 Training Data Collection
 
+**Phase 0 — Bootstrap decision:**
+- Do **not** require a separate offline pretraining run for the normal `hybrid_dl` benchmark. The current implementation already performs an online warm-up: retraining is triggered every `TRAIN_EVERY = 10` newly interesting behaviors, and the scheduler stays mostly static until it has seen at least 20 samples and 2 training rounds.
+- Do require a **bootstrap checkpoint** for the frozen-model ablation (**A4**) only. In the current code, `--no-retrain` disables the periodic and final retraining path; if `--fresh-start` also removes the checkpoint, A4 would measure a cold, effectively untrained model rather than a "train once, then freeze" model.
+
 **Phase 1 — Cold start corpus:**
-- Seed with 100–500 hand-crafted valid inputs per target format
-- Run target with each seed and record edge bitmap → initial training set
+- Seed each target with the existing hand-crafted corpus (`--seeds-n 100` by default) rather than waiting to accumulate a large AFL-style offline dataset.
+- Start fuzzing immediately from that corpus and let the online training loop collect the initial `(input, behavior)` pairs from genuinely interesting executions.
 
-**Phase 2 — Incremental retraining:**
-- After every `B = 50` new executions, compute misprediction rate on recent inputs
-- If misprediction rate > `τ`, trigger retraining on the full accumulated corpus
-- Cap corpus size at `C_max = 10,000` inputs to bound memory and training time
+**Phase 2 — Online warm-up and incremental retraining:**
+- For normal `hybrid_dl` and `A5` runs, treat the first two retraining rounds as a warm-up period; guided mutation should not be considered "active" until the scheduler exits its `undertrained_*` fallback states.
+- Record the first timestamp at which the scheduler becomes eligible for guided mutation (`training_samples_seen >= 20` and `training_rounds >= 2`) and report it as the model's activation point.
+- Keep retraining on the accumulated interesting-behavior buffer, but gate interpretation using the logged `misprediction_rate` and `duration_sec` so training overhead and learning quality are both visible.
 
-> **Deviation from NEUZZ:** NEUZZ uses a static 5:1 train/test split on an AFL-generated corpus (~2K inputs) to detect overfitting before deployment. This is not applicable here for two reasons: (1) the opaque PyInstaller binaries cannot be instrumented with AFL, so the corpus grows incrementally at ~2 new behaviors per hour rather than starting from 2K; a 5:1 split on 10–20 samples would reduce the training set below useful size. (2) The rolling `misprediction_rate` metric — computed on the `B` most recent inputs immediately before each retrain event — serves as an equivalent overfitting signal for the incremental setting.
+**Phase 3 — Validation strategy:**
+- For opaque binary targets (IPv4, IPv6, cidrize), prefer a rolling hold-out based on the most recent interesting inputs instead of NEUZZ's static 5:1 split. The dataset arrives too slowly for a large up-front split to be statistically useful.
+- For shared-source baselines where AFL-style corpus generation is feasible (`cJSON`, `LAVA-M`), retain NEUZZ-compatible reporting: one hour of AFL warm-up to build the initial corpus, then use the same initial corpus for all fuzzers in the comparison.
+- Add a small fixed validation slice for each retrain event when enough data exists (target: latest 10-20% of the interesting-behavior buffer, minimum 10 samples) and log both training loss and hold-out loss. This follows the NEUZZ++ recommendation that ML-specific metrics be evaluated on data distinct from the training set.
 
-**Phase 3 — Convergence criteria:**
-- Training is considered converged when validation loss improvement < `1e-4` for 5 consecutive epochs
-- Record number of retraining events, average retraining time, and misprediction rate trajectory
+> **Approach taken from NEUZZ / NEUZZ++:** NEUZZ bootstraps from an AFL-generated corpus of about 2K inputs and splits it 5:1 into train/test before 24-hour campaigns. We should keep that setup only for the shared-source comparison targets (`cJSON`, `LAVA-M`), where it is reproducible. For the assignment's slow opaque binaries, follow the implementation's online design instead: start fuzzing immediately, warm up conservatively, and validate each retrain event on a rolling hold-out. This preserves the spirit of NEUZZ's incremental learning while adopting NEUZZ++'s stronger ML-evaluation discipline.
+
+**Phase 4 — Convergence criteria:**
+- Training is considered operationally mature when the scheduler has exited warm-up and the rolling hold-out loss or `misprediction_rate` no longer improves materially across consecutive retrain events.
+- Record number of retraining events, average retraining time, activation time, hold-out loss trajectory, and misprediction rate trajectory.
 
 ### 3.4 Gradient Computation Verification
 
@@ -185,16 +194,23 @@ No dictionary, default power schedule, QEMU mode on plain binary.
 #### NEUZZ (QEMU mode)
 **Why:** The closest methodological predecessor — gradient-guided mutation with a neural surrogate. The primary comparison point for our neural scheduler contribution. Any gain over NEUZZ isolates the value of format-awareness and the DL energy scheduler specifically.
 
-**Setup:** Original NEUZZ codebase with QEMU coverage on the same plain binary; train surrogate on same initial corpus as our fuzzer; same 4096-neuron MLP.
+**Setup:** Original NEUZZ codebase with QEMU coverage on the same plain binary. For `cJSON` and `LAVA-M`, follow the paper's setup as closely as practical: run AFL for one hour to build the initial corpus, train on that corpus, and then launch the fixed-time campaign from the same seed set for every fuzzer.
 
 **Expected limitation:** NEUZZ uses no format knowledge; byte-level gradient guidance alone may miss multi-byte structural constraints in JSON and CIDR.
 
-#### MLFuzz / PreFuzz (if available)
-**Why:** Represents the most recent NPS-guided fuzzing work. Tests whether our format-aware approach improves over the current state of the art in the NPS family.
+#### NEUZZ++ (preferred modern NPS baseline)
+**Why:** NEUZZ++ is the strongest directly relevant follow-up study because it revisits neural program smoothing with a more practical implementation and a much stricter benchmarking methodology. It is the right reference point for how to test an ML-guided fuzzer credibly, even when NEUZZ remains the historical baseline for architecture choices.
 
-**Setup:** Use published configuration with QEMU mode on the same plain binary.
+**Setup:** Use the published NEUZZ++ / MLFuzz configuration on the same shared plain binary targets where possible. Reuse the same initial corpus, coverage metric, harness mode, and wall-clock budget as the other greybox fuzzers. Replay each run's final corpus under one common coverage collector so the comparison metric is identical across tools.
 
-**Note:** If MLFuzz/PreFuzz source is unavailable or requires proprietary infrastructure, document this explicitly and replace with **ANGORA** (gradient-guided without smoothing) as an alternative data point.
+**Expected limitation:** NEUZZ++ shows that many prior NPS gains disappear under stronger baselines and more repetitions. We should therefore treat NEUZZ++ as both a competitor and a methodological guardrail.
+
+#### PreFuzz / MLFuzz (supplementary, if available)
+**Why:** Provides one more data point from the broader neural-program-smoothing family, but is less central than NEUZZ and NEUZZ++ for this project's story.
+
+**Setup:** Use published configuration only if it can be reproduced on the same targets and coverage metric without changing the harness assumptions.
+
+**Note:** If PreFuzz / MLFuzz setup is unavailable or too infrastructure-heavy, document this explicitly and omit it rather than weakening the primary NEUZZ / NEUZZ++ comparison.
 
 #### libFuzzer (supplementary only)
 **Why:** Represents the state of the art in production coverage-guided fuzzing without ML.
@@ -221,15 +237,298 @@ Collect the following metrics for all fuzzers across all targets:
 
 Fuzzing results have high variance. To ensure statistical validity:
 
-- Run each fuzzer × target combination **10 independent times** with different random seeds
+- For the shared-source benchmark targets (`cJSON`, `LAVA-M`), target **20-30 independent runs** per fuzzer × target combination; NEUZZ++ explicitly recommends 30 trials for ML-based fuzzing because variance can be higher than in standard greybox fuzzers.
+- For the slow opaque binaries (`ipv4`, `ipv6`, `cidrize`), treat **10 runs** as the minimum reportable benchmark and **3-5 runs** as pilot-only, not final-evidence, numbers.
 - Report **mean ± standard deviation** for all metrics
 - Use the **Mann-Whitney U test** (non-parametric, no normality assumption) to test significance of pairwise differences; report p-values
 - Report **Vargha-Delaney A₁₂ effect size** for coverage comparisons
-- Draw **coverage over time** plots with shaded 95% confidence intervals across 10 runs
+- Draw **coverage over time** plots with shaded 95% confidence intervals and clearly state the exact run count per target
+- Replay each finished corpus through a common coverage measurement pass when comparing different fuzzers, following the NEUZZ++ / FuzzBench-style recommendation to avoid mismatched internal coverage metrics
 
 ### 4.5 Time Budget
 
-Each fuzzer run is **24 hours** of wall-clock fuzzing time, matching the NEUZZ paper evaluation. For LAVA-M, use **6 hours** (standard in the literature).
+- Keep **24 hours** as the primary wall-clock budget for the shared-source greybox benchmark (`cJSON`; optionally additional open-source targets), matching NEUZZ's headline comparison window.
+- Keep **6 hours** for `LAVA-M`, which is standard in the literature and was also used by NEUZZ for that dataset.
+- For the opaque Windows parser targets, use a staged protocol:
+  - `10 minutes` for pilot / harness validation
+  - `1-2 hours` for development checks and checkpoint bootstrap generation
+  - `6-24 hours` for final effectiveness runs, with the exact budget reported alongside the low execution rate of the PyInstaller targets
+- Do not compare a 6-hour opaque-binary run directly against a 24-hour NEUZZ result; only compare tools under matched time budgets on the same target and harness.
+
+### 4.6 New-Format Onboarding Benchmark
+
+In addition to bug-finding and coverage benchmarking on the existing targets, the project should explicitly measure **format transfer**: how well the fuzzer absorbs a previously unseen input format under a constrained onboarding budget.
+
+This benchmark is not asking "can the fuzzer find bugs in one more parser if we hand-write a strong mutator?" Instead, it asks:
+
+> **Given a new format the fuzzer has never seen before, how much effectiveness does it retain with minimal format-specific engineering?**
+
+This is especially important for the current architecture because the repository already exposes a meaningful low-effort onboarding path through:
+
+- `config/<format>_format.json`
+- `GenericSeedGenerator`
+- `GenericSemanticMutator`
+
+The benchmark should therefore evaluate the quality of that path directly, rather than only the quality of hand-written format-specific extensions.
+
+#### 4.6.1 Research question
+
+Add a transfer-focused sub-question under RQ3:
+
+| ID | Question |
+|----|----------|
+| RQ3a | How effectively does the fuzzer generalise to a previously unseen format under limited onboarding effort? |
+
+#### 4.6.2 Onboarding budgets
+
+For each held-out format, evaluate three onboarding levels:
+
+| Level | Allowed work | Purpose |
+|------|--------------|---------|
+| **B0: config-only** | Add only `config/<format>_format.json` with `valid_examples` and minimal metadata | Tests true low-effort transfer |
+| **B1: config+hints** | Add config plus token hints / mutation hints / bootstrap hints; no custom Python mutator | Tests whether generic infrastructure is sufficient with moderate guidance |
+| **B2: custom mutator** | Add a dedicated seed generator and/or semantic mutator | Upper bound for that format in the current architecture |
+
+The primary transfer metric should be:
+
+> **How close does B0 or B1 get to B2 under the same time budget?**
+
+If a new format only works well after B2, then the fuzzer is extensible, but not strongly format-transferable.
+
+#### 4.6.3 Candidate held-out formats
+
+Choose **4-6 previously unsupported formats** with increasing structural difficulty. Recommended progression:
+
+| Format | Why it is useful |
+|--------|------------------|
+| MAC address | Fixed-field delimiter-separated text; simplest transfer case |
+| Semantic version (`semver`) | Optional fields and precedence/build suffixes |
+| URL / URI | Multiple optional components and separator semantics |
+| Email address | Local/domain structure with quoting and edge-case validity rules |
+| ISO-8601 date/time | Normalisation and cross-field validity constraints |
+| CSV row with quoting/escaping | Tests delimiter, escaping, and quoted-field handling |
+
+Stretch target:
+
+| Format | Why it is useful |
+|--------|------------------|
+| Small binary/container format | Tests whether the generic fallback remains effective outside structured text |
+
+The held-out formats should not receive a format-specific mutator during B0 or B1. They must remain genuinely "new" to the fuzzer until B2.
+
+#### 4.6.4 Metrics
+
+For each format × onboarding level combination, collect:
+
+| Metric | Meaning |
+|--------|---------|
+| Time to first valid input | How quickly the fuzzer reaches the parser success path |
+| Valid-input rate over time | Whether mutations preserve enough structure to keep exploring deeper logic |
+| Coverage growth over time | Standard effectiveness signal |
+| Unique interesting inputs | Diversity of retained structured exploration |
+| Real bugs / oracle mismatches | Whether transfer quality leads to bug-finding, not just syntax churn |
+| Onboarding effort | Files changed, lines changed, and approximate engineering time |
+
+In addition to raw coverage, define a **transfer efficiency score**:
+
+```text
+transfer_efficiency = coverage(B0 or B1) / coverage(B2)
+```
+
+reported at matched checkpoints (for example 10 min, 1 h, 6 h, final).
+
+#### 4.6.5 Evaluation protocol
+
+For each held-out format:
+
+1. Implement B0 and run `N` repeated trials under a fixed budget.
+2. Extend to B1 without adding custom format-specific mutation code; rerun the same protocol.
+3. Implement B2 as the best practical hand-written mutator/generator for that format.
+4. Compare B0, B1, and B2 on matched seeds, harness, oracle, and wall-clock budget.
+
+Keep the same statistical guidance as Section 4.4:
+
+- Prefer **20-30 runs** when the target is fast enough.
+- Treat **10 runs** as the minimum reportable count for slower targets.
+- Report mean ± SD, Mann-Whitney U, and effect size.
+
+#### 4.6.6 What success looks like
+
+Interpretation should be conservative:
+
+- **Strong transfer:** B0 already reaches a substantial fraction of B2.
+- **Moderate transfer:** B1 performs well, but B0 is weak.
+- **Low transfer / high extension cost:** Only B2 performs well.
+
+For this project, the most meaningful success criterion is:
+
+> **A new format should be considered successfully onboarded only if the config-driven path (B0 or B1) is competitive with the custom-mutation upper bound.**
+
+That criterion aligns the benchmark with the actual architectural promise of the repository: not just that it can be extended to new formats, but that it can absorb them with limited manual work.
+
+#### 4.6.7 Literature rationale
+
+This benchmark design is motivated by prior structured-input fuzzing work:
+
+- **NAUTILUS** and **Superion** show that structure-preserving mutation is essential once inputs are more constrained than byte-level fuzzers can handle reliably.
+- **Gramatron** shows that grammar-aware mutation should include larger, higher-level structural edits rather than only local repairs.
+- **Fuzz4All** suggests LLMs are most useful as an offline bootstrap aid for unseen input languages, not as the hot-loop mutator itself.
+- **FieldsFuzz** highlights that field dependencies become the main bottleneck as formats become more realistic.
+
+Together, these papers imply that the right transfer benchmark is not simply "one more target", but a staged measurement of how much manual format knowledge the fuzzer still requires before it becomes effective.
+
+#### 4.6.8 Concrete held-out benchmark: ISO-8601 datetime
+
+If only **one** new-format transfer benchmark is implemented, use **ISO-8601 datetime strings** as the held-out format.
+
+**Why this format**
+
+- It is clearly more structured than IPv4 but simpler than full JSON.
+- It has multiple optional components: date-only, datetime, seconds, fractional seconds, `Z`, and signed timezone offsets.
+- It includes real cross-field validity constraints such as month/day ranges, leap years, hour/minute/second bounds, and timezone syntax.
+- It is still a string format, so it exercises the repository's generic text-format fallback path without requiring a binary/container extension.
+- It has a practical oracle path in Python, which keeps the benchmark realistic for this repository.
+
+##### 4.6.8.1 Scope of accepted inputs
+
+To keep the benchmark precise, define the accepted language as this **restricted ISO-8601 subset**:
+
+- Date only: `YYYY-MM-DD`
+- Datetime without timezone: `YYYY-MM-DDTHH:MM:SS`
+- Datetime with fractional seconds: `YYYY-MM-DDTHH:MM:SS.ssssss`
+- Datetime with UTC suffix: `YYYY-MM-DDTHH:MM:SSZ`
+- Datetime with signed offset: `YYYY-MM-DDTHH:MM:SS+08:00`
+
+Out of scope for this benchmark:
+
+- Week dates
+- Ordinal dates
+- Reduced precision dates such as `YYYY-MM`
+- Named time zones
+- Free-form whitespace-tolerant variants
+
+This restricted scope avoids oracle ambiguity and makes the transfer experiment easier to reproduce.
+
+##### 4.6.8.2 Oracle choice
+
+Use a **shape-first oracle** similar in spirit to the existing parser oracles.
+
+Primary oracle:
+
+- Python standard library `datetime.date.fromisoformat(...)`
+- Python standard library `datetime.datetime.fromisoformat(...)`
+
+Oracle policy:
+
+- If the input matches the benchmark's supported shapes and the corresponding stdlib parser accepts it, classify as **oracle-valid**.
+- If the input matches the supported shapes but stdlib parsing fails, classify as **oracle-invalid**.
+- If the input falls outside the benchmark's supported shapes, classify as **oracle-unsupported**.
+
+Normalization policy:
+
+- Normalize `Z` to `+00:00` before passing to `datetime.fromisoformat(...)` if needed.
+- Preserve the original input for bug reporting, but store a normalized value in oracle metadata for easier deduplication.
+
+Suggested oracle metadata fields:
+
+| Field | Meaning |
+|------|---------|
+| `shape` | `date`, `datetime`, `datetime_frac`, `datetime_z`, or `datetime_offset` |
+| `normalized` | Canonicalized datetime string if supported |
+| `expected_valid` | `true`, `false`, or `null` for unsupported |
+| `reason` | Short classifier label such as `iso_datetime_valid`, `iso_datetime_invalid_day`, `iso_datetime_unsupported_shape` |
+
+##### 4.6.8.3 Onboarding budgets for this format
+
+Use this exact progression:
+
+| Level | Allowed work for ISO-8601 benchmark |
+|------|--------------------------------------|
+| **B0: config-only** | Add `config/iso8601_format.json` with `valid_examples`, field names, and no custom Python mutator |
+| **B1: config+hints** | Add token hints and mutation hints for separators (`-`, `T`, `:`, `.`, `+`, `Z`) and numeric fields; still no custom mutator |
+| **B2: custom mutator** | Add `ISO8601SeedGenerator` and/or `ISO8601SemanticMutator` with date/time-aware boundary mutations |
+
+##### 4.6.8.4 Seed examples
+
+Start B0 with a compact but diverse valid seed set:
+
+```text
+2026-01-01
+2024-02-29
+2026-04-15T00:00:00
+2026-04-15T12:34:56
+2026-04-15T12:34:56.123456
+2026-04-15T12:34:56Z
+2026-04-15T12:34:56+00:00
+2026-04-15T20:34:56+08:00
+1999-12-31T23:59:59-05:00
+```
+
+Recommended structured-invalid seeds for later B2 comparison:
+
+```text
+2026-13-01
+2026-02-29
+2026-04-31
+2026-04-15T24:00:00
+2026-04-15T12:60:00
+2026-04-15T12:34:60
+2026-04-15T12:34
+2026-04-15 12:34:56
+2026-04-15T12:34:56+2400
+```
+
+##### 4.6.8.5 Expected useful mutations in B2
+
+If B2 is implemented, the custom mutator should focus on:
+
+- Year boundary changes: `0001`, `1970`, `1999`, `2000`, `2038`, `9999`
+- Month/day consistency: `02-29`, `04-31`, `12-31`
+- Leap-year flips: valid leap day to invalid non-leap day and back
+- Time boundaries: `00:00:00`, `23:59:59`, `24:00:00`
+- Fractional-second expansion/truncation
+- Offset mutations: `Z`, `+00:00`, `-00:00`, `+14:00`, `-12:00`, malformed offsets
+- Separator confusion: replacing `T`, `:`, `-`, `.`, `+`, or dropping them entirely
+
+These mutations directly test whether the fuzzer can preserve high-level shape while still crossing semantic validity boundaries.
+
+##### 4.6.8.6 Scorecard template
+
+Use the following per-format scorecard for reporting:
+
+| Metric | B0: config-only | B1: config+hints | B2: custom mutator |
+|--------|------------------|------------------|--------------------|
+| Files added / changed | | | |
+| Approx. engineering time | | | |
+| Valid seed count | | | |
+| Time to first valid parse | | | |
+| Valid-input rate @ 10 min | | | |
+| Valid-input rate @ end of run | | | |
+| Coverage @ 10 min | | | |
+| Coverage @ 1 h | | | |
+| Coverage @ end of run | | | |
+| Unique interesting inputs | | | |
+| Unique real bugs / oracle mismatches | | | |
+| Transfer efficiency vs B2 | | | `1.00` |
+
+Also include a short qualitative verdict:
+
+| Verdict field | Notes |
+|--------------|-------|
+| Mutation quality | Are inputs staying close to supported shapes? |
+| Oracle usefulness | Did the oracle classify enough cases to be informative? |
+| Main failure mode | Syntax destruction, low valid rate, shallow coverage, or oracle ambiguity |
+| Overall transfer result | Strong / Moderate / Low |
+
+##### 4.6.8.7 Success criterion for this concrete benchmark
+
+For the ISO-8601 benchmark, declare the generic path successful only if:
+
+- **B0 or B1 reaches at least 70% of B2 final coverage**, and
+- **B0 or B1 reaches the first valid parse within the same order of magnitude of time as B2**, and
+- **B0 or B1 maintains a non-trivial valid-input rate** rather than collapsing into near-total syntax destruction.
+
+That threshold is intentionally strict enough to distinguish real transfer from mere extensibility.
 
 ---
 
@@ -247,7 +546,7 @@ All variants are implemented. Run each with `--fresh-start --time-budget 86400 -
 | **A1** | Format-aware mutation (tiers 1+2 disabled; raw bytes only) | Isolates value of format knowledge | `--evaluation-mode havoc_only` |
 | **A2** | Neural surrogate scheduler disabled; uniform energy | Isolates value of DL energy scheduling | `--evaluation-mode static_payoff` |
 | **A3** | Gradient-guided byte selection disabled; random byte selection | Isolates value of gradient signal for mutation | `--evaluation-mode hybrid_dl --no-gradient-guidance` |
-| **A4** | Incremental retraining disabled; surrogate trained once on initial corpus only | Isolates value of online learning | `--evaluation-mode hybrid_dl --no-retrain` |
+| **A4** | Incremental retraining disabled; surrogate loaded from a prebuilt bootstrap checkpoint and then frozen | Isolates value of online learning after cold start | `--evaluation-mode hybrid_dl --no-retrain` |
 | **A5** | Cosine decay with restarts replaced by fixed LR `1e-3` | Isolates value of LR schedule | `--evaluation-mode hybrid_dl --fixed-lr` |
 
 ### 5.2 What Each Ablation Tells You
@@ -258,7 +557,7 @@ All variants are implemented. Run each with `--fresh-start --time-budget 86400 -
 
 **A3 (no gradient selection):** Compares gradient-guided byte selection against random byte selection with the same surrogate. A significant drop confirms that the gradient signal, not just the surrogate's existence, is responsible for gains.
 
-**A4 (no incremental retraining):** Tests whether the surrogate needs to stay up-to-date. A significant drop means the online learning loop is essential; a small drop means the cold-start surrogate generalises well enough.
+**A4 (frozen checkpoint):** Tests whether the surrogate needs to stay up-to-date after an initial bootstrap phase. A significant drop means the online learning loop is essential; a small drop means the warm-start checkpoint generalises well enough.
 
 **A5 (fixed LR):** Validates whether the cosine decay schedule meaningfully helps surrogate accuracy under incremental retraining conditions. Fixed LR used is `1e-3` (the Adam base rate in trainer.py).
 
@@ -270,7 +569,13 @@ python main.py ipv4 --evaluation-mode hybrid_dl --fresh-start --time-budget 600 
 ```
 Check that `results/ipv4/energy_log.csv`, `oracle_log.csv`, and `dl_training.jsonl` are produced and non-empty.
 
-**Step 1 — Run each variant.** For each combination of variant × target × seed (1..5), run:
+**Step 1 — Build the frozen checkpoint for A4.** For each binary target used in A4, run one short bootstrap campaign with retraining enabled and archive the resulting checkpoint:
+```bash
+python main.py <target> --evaluation-mode hybrid_dl --fresh-start --time-budget 3600 --seed 1
+```
+Copy `models/<target>_surrogate.pt` into `savedruns/bootstrap_checkpoints/` and reuse that checkpoint for every A4 repetition on the same target. Do not let `--fresh-start` delete the checkpoint immediately before an A4 run without restoring it first.
+
+**Step 2 — Run each variant.** For each combination of variant × target × seed (1..5), run:
 ```bash
 python main.py <target> <flags> --fresh-start --time-budget 86400 --seed <N>
 ```
@@ -286,14 +591,15 @@ cp -r results/<target> ablation_results/<variant_id>/<target>/run<N>
 Targets for binary variants (Full, A1–A5): `ipv4`, `ipv6`, `cidrize`.
 The `json` target uses the Atheris harness and has no DL scheduler — only A1 (`havoc_only`) is meaningful for it.
 
-**Step 2 — Collect metrics.** After all runs, for each variant × target combination:
+**Step 3 — Collect metrics.** After all runs, for each variant × target combination:
 - Load `ablation_results/<variant>/<target>/run*/plot_data` (CSV)
 - Compute mean ± SD of `behaviors_seen` at the 24h mark across the 5 runs
 - Compute mean ± SD of `misprediction_rate` from `dl_training.jsonl` (Full, A3, A4, A5 only)
+- For A4, also record whether the checkpoint was successfully loaded at run start (`dl_summary.json` / `fuzzer_config.json`) so the ablation is not accidentally measuring an untrained model
 
-**Step 3 — Fill the results table** (Section 5.4) and rank components by `ΔCov(Full) − ΔCov(Aᵢ)`.
+**Step 4 — Fill the results table** (Section 5.4) and rank components by `ΔCov(Full) − ΔCov(Aᵢ)`.
 
-**Step 4 — Plot.** Use `python evaluation/plot_progress.py <target>` for per-run curves.
+**Step 5 — Plot.** Use `python evaluation/plot_progress.py <target>` for per-run curves.
 
 **Results directory convention:**
 ```
@@ -477,9 +783,9 @@ Each of the following claims must be directly supported by experimental results:
 | Format-aware mutation improves coverage on structured targets | A1 ablation + benchmark vs AFL |
 | DL scheduler adds value over uniform energy | A2 ablation |
 | Gradient-guided selection outperforms random selection | A3 ablation |
-| Our fuzzer outperforms NEUZZ on JSON target | Benchmark metric table |
-| Incremental retraining is necessary for sustained coverage | A4 ablation, coverage-over-time plot |
+| Our fuzzer matches or exceeds NEUZZ / NEUZZ++ on shared binary targets under matched budgets | Benchmark metric table + common replayed coverage metric |
+| Incremental retraining is necessary for sustained coverage after warm start | A4 ablation, coverage-over-time plot, checkpoint-loaded metadata |
 
 ---
 
-*Document version 1.0 — to be updated after pilot run results.*
+*Document version 1.1 — updated on 2026-04-15 using NEUZZ / NEUZZ++ evaluation guidance and the repository's current online-training implementation.*

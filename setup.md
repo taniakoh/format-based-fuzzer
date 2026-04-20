@@ -149,8 +149,8 @@ python --version
 
 ```bash
 # Single target
-python main.py ipv4 --time-budget 300 --fresh-start
-python main.py ipv6 --time-budget 300 --fresh-start
+python main.py ipv4 --time-budget 3600 --fresh-start
+python main.py ipv6 --time-budget 3600 --fresh-start
 python main.py cidrize --time-budget 300 --fresh-start
 python main.py cjson --time-budget 300 --fresh-start
 python main.py json --time-budget 300 --fresh-start

@@ -18,6 +18,7 @@ from typing import Callable
 class CorpusEntry:
     seed: bytes
     base_priority: float = 1.0
+    rare_score: float = 0.0
     attempts: int = 0
     successes: int = 0
     added_round: int = 0
@@ -31,16 +32,18 @@ class Corpus:
         self._index_by_seed: dict[bytes, int] = {}
         self._selection_round = 0
 
-    def add(self, seed: bytes, priority: float = 1.0) -> None:
+    def add(self, seed: bytes, priority: float = 1.0, rare_score: float = 0.0) -> None:
         existing_index = self._index_by_seed.get(seed)
         if existing_index is not None:
             entry = self._entries[existing_index]
             entry.base_priority = max(entry.base_priority, float(priority))
+            entry.rare_score = max(entry.rare_score, float(rare_score))
             return
 
         entry = CorpusEntry(
             seed=seed,
             base_priority=max(0.05, float(priority)),
+            rare_score=max(0.0, float(rare_score)),
             added_round=self._selection_round,
             last_success_round=self._selection_round,
         )
@@ -62,7 +65,13 @@ class Corpus:
         chosen.last_selected_round = self._selection_round
         return chosen.seed
 
-    def record_result(self, seed: bytes, discovered_new_behavior: bool) -> None:
+    def record_result(
+        self,
+        seed: bytes,
+        discovered_new_behavior: bool,
+        rarity_score: float = 0.0,
+        cooldown_factor: float = 1.0,
+    ) -> None:
         """Update the parent seed's payoff after one mutation/execution cycle."""
         index = self._index_by_seed.get(seed)
         if index is None:
@@ -70,6 +79,8 @@ class Corpus:
 
         entry = self._entries[index]
         entry.attempts += 1
+        entry.rare_score = max(entry.rare_score * 0.92, float(rarity_score))
+        entry.base_priority = max(0.02, entry.base_priority * max(0.05, float(cooldown_factor)))
         if discovered_new_behavior:
             entry.successes += 1
             entry.last_success_round = self._selection_round
@@ -106,9 +117,12 @@ class Corpus:
             stale_rounds = max(0, rounds_since_success - 8)
             staleness_penalty = 1.0 / (1.0 + stale_rounds * 0.03)
 
+        rare_edge_bonus = 1.0 + min(2.5, entry.rare_score) * 0.35
+
         return max(
             0.01,
             dynamic_priority
+            * rare_edge_bonus
             * novelty_boost
             * success_bonus
             * failure_penalty

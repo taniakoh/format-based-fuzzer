@@ -9,6 +9,7 @@ behaviors, then feed those scores back into future plans.
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 
 
@@ -61,6 +62,7 @@ class MutationPayoffTracker:
         self.static_weights = self._normalize_weights(static_weights)
         self.operator_stats: dict[str, OutcomeStat] = {}
         self.field_stats: dict[str, OutcomeStat] = {}
+        self.family_field_stats: dict[str, OutcomeStat] = {}
         self.guidance_stats: dict[str, OutcomeStat] = {}
         self.stage_stats: dict[str, OutcomeStat] = {}
         self.seed_family_stats: dict[str, OutcomeStat] = {}
@@ -111,7 +113,13 @@ class MutationPayoffTracker:
                 )
             field = semantic_trace.get("field")
             if field:
-                self._update_stat(self.field_stats, str(field), discovered_new_behavior)
+                field_name = str(field)
+                self._update_stat(self.field_stats, field_name, discovered_new_behavior)
+                self._update_stat(
+                    self.family_field_stats,
+                    f"{seed_family}|{field_name}",
+                    discovered_new_behavior,
+                )
             guidance = semantic_trace.get("guidance")
             if guidance:
                 self._update_stat(self.guidance_stats, str(guidance), discovered_new_behavior)
@@ -130,7 +138,13 @@ class MutationPayoffTracker:
                     discovered_new_behavior,
                 )
             for field in havoc_trace.get("fields", []):
-                self._update_stat(self.field_stats, str(field), discovered_new_behavior)
+                field_name = str(field)
+                self._update_stat(self.field_stats, field_name, discovered_new_behavior)
+                self._update_stat(
+                    self.family_field_stats,
+                    f"{seed_family}|{field_name}",
+                    discovered_new_behavior,
+                )
             guided_iterations = int(havoc_trace.get("guided_iterations", 0))
             random_iterations = int(havoc_trace.get("random_iterations", 0))
             if guided_iterations > 0:
@@ -142,6 +156,7 @@ class MutationPayoffTracker:
         return {
             "operators": self._serialize_stats(self.operator_stats),
             "fields": self._serialize_stats(self.field_stats),
+            "family_fields": self._serialize_stats(self.family_field_stats),
             "guidance": self._serialize_stats(self.guidance_stats),
             "stages": self._serialize_stats(self.stage_stats),
             "seed_families": self._serialize_stats(self.seed_family_stats),
@@ -221,13 +236,30 @@ class MutationPayoffTracker:
         )
 
     def _preferred_fields(self, seed_family: str) -> list[str]:
-        del seed_family  # Reserved for later per-family field ranking.
+        field_names = {
+            *self.field_stats.keys(),
+            *(
+                key.split("|", 1)[1]
+                for key in self.family_field_stats
+                if key.startswith(f"{seed_family}|")
+            ),
+        }
         ranked = sorted(
-            self.field_stats.items(),
-            key=lambda item: self._score(item[1]),
+            field_names,
+            key=lambda name: (
+                self._field_score(seed_family, name),
+                self._score(self.family_field_stats.get(f"{seed_family}|{name}")),
+                self._score(self.field_stats.get(name)),
+                name,
+            ),
             reverse=True,
         )
-        return [name for name, _ in ranked[: self.MAX_PREFERRED_FIELDS]]
+        return ranked[: self.MAX_PREFERRED_FIELDS]
+
+    def _field_score(self, seed_family: str, field_name: str) -> float:
+        family_score = self._score(self.family_field_stats.get(f"{seed_family}|{field_name}"))
+        global_score = self._score(self.field_stats.get(field_name))
+        return (0.65 * family_score) + (0.35 * global_score)
 
     def _score(self, stat: OutcomeStat | None) -> float:
         if stat is None or stat.attempts <= 0:
@@ -268,12 +300,125 @@ class MutationPayoffTracker:
         return {op: max(0.0, value) / total for op, value in weights.items()}
 
 
+class AdaptiveStructureRegulator:
+    """Shift exploration away from repeated shallow rejection paths."""
+
+    RECENT_WINDOW = 48
+    DOMINANT_SITE_THRESHOLD = 4
+    MIN_SEMANTIC_BOOST = 0.0
+    MAX_SEMANTIC_BOOST = 0.30
+    MAX_GUIDED_BOOST = 0.12
+
+    def __init__(self) -> None:
+        self._recent_outcomes: deque[tuple[str, bool]] = deque(maxlen=self.RECENT_WINDOW)
+        self._recent_sites: deque[str] = deque(maxlen=self.RECENT_WINDOW)
+        self._site_counts: dict[str, int] = {}
+
+    def observe(self, *, bug_type: str, bug_site_key: str, is_new: bool) -> dict[str, float]:
+        normalized_type = str(bug_type or "")
+        self._recent_outcomes.append((normalized_type, bool(is_new)))
+
+        repeated_count = 0
+        if self._is_shallow_rejection(normalized_type, bug_site_key):
+            if len(self._recent_sites) == self._recent_sites.maxlen:
+                expired = self._recent_sites.popleft()
+                self._decrement_site(expired)
+            self._recent_sites.append(bug_site_key)
+            self._site_counts[bug_site_key] = self._site_counts.get(bug_site_key, 0) + 1
+            repeated_count = self._site_counts[bug_site_key]
+
+        pressure = self.structure_pressure()
+        cooldown = 1.0
+        if repeated_count >= self.DOMINANT_SITE_THRESHOLD and pressure > 0.0:
+            extra_hits = repeated_count - self.DOMINANT_SITE_THRESHOLD + 1
+            cooldown = max(0.35, 1.0 - min(0.55, extra_hits * 0.10 * pressure))
+        return {
+            "structure_pressure": pressure,
+            "cooldown_factor": cooldown,
+            "dominant_site_hits": float(repeated_count),
+        }
+
+    def adjust_plan(self, plan: dict[str, object]) -> dict[str, object]:
+        pressure = self.structure_pressure()
+        if pressure <= 0.0:
+            plan["structure_pressure"] = 0.0
+            return plan
+
+        plan["structure_pressure"] = round(pressure, 4)
+        plan["semantic_probability"] = min(
+            0.98,
+            float(plan.get("semantic_probability", 0.5)) + (self.MAX_SEMANTIC_BOOST * pressure),
+        )
+        plan["guided_ratio"] = min(
+            0.98,
+            float(plan.get("guided_ratio", 0.7)) + (self.MAX_GUIDED_BOOST * pressure),
+        )
+
+        weights = dict(plan.get("weights", {}))
+        if weights:
+            adjusted = self._stabilize_weights(weights, pressure)
+            plan["weights"] = adjusted
+        return plan
+
+    def structure_pressure(self) -> float:
+        if len(self._recent_outcomes) < 8:
+            return 0.0
+        invalidity_hits = sum(1 for bug_type, _ in self._recent_outcomes if bug_type == "invalidity")
+        pass_hits = sum(1 for bug_type, _ in self._recent_outcomes if bug_type == "PASS")
+        new_hits = sum(1 for _, is_new in self._recent_outcomes if is_new)
+        total = max(1, len(self._recent_outcomes))
+        dominant_site = max(self._site_counts.values(), default=0)
+
+        invalidity_ratio = invalidity_hits / total
+        pass_ratio = pass_hits / total
+        novelty_ratio = new_hits / total
+        dominant_ratio = dominant_site / total
+
+        if invalidity_ratio < 0.55 or dominant_site < self.DOMINANT_SITE_THRESHOLD:
+            return 0.0
+
+        pressure = (invalidity_ratio - 0.55) * 1.5
+        pressure += max(0.0, 0.12 - pass_ratio) * 1.5
+        pressure += max(0.0, 0.18 - novelty_ratio) * 1.2
+        pressure += dominant_ratio * 1.4
+        return max(0.0, min(1.0, pressure))
+
+    def _decrement_site(self, bug_site_key: str) -> None:
+        remaining = self._site_counts.get(bug_site_key, 0) - 1
+        if remaining > 0:
+            self._site_counts[bug_site_key] = remaining
+        else:
+            self._site_counts.pop(bug_site_key, None)
+
+    @staticmethod
+    def _is_shallow_rejection(bug_type: str, bug_site_key: str) -> bool:
+        if bug_type not in {"invalidity", "syntactic"}:
+            return False
+        return bool(bug_site_key)
+
+    @staticmethod
+    def _stabilize_weights(weights: dict[str, float], pressure: float) -> dict[str, float]:
+        adjusted = dict(weights)
+        destructive = {"delete_range", "insert_random", "byte_substitute", "bit_flip"}
+        structure_friendly = {"arithmetic", "interesting_byte", "splice"}
+
+        for op in destructive:
+            if op in adjusted:
+                adjusted[op] *= max(0.25, 1.0 - (0.45 * pressure))
+        for op in structure_friendly:
+            if op in adjusted:
+                adjusted[op] *= 1.0 + (0.35 * pressure)
+
+        return MutationPayoffTracker._normalize_weights(adjusted)  # noqa: SLF001
+
+
 class StaticScheduler:
     """Static scheduler plus online mutation-payoff learning."""
 
     def __init__(self, format_config: dict):
         self.payoff_tracker = MutationPayoffTracker(format_config["havoc_operators"])
         self.static_weights = dict(self.payoff_tracker.static_weights)
+        self.structure_regulator = AdaptiveStructureRegulator()
 
     def get_operator_weights(self, seed: bytes) -> dict[str, float]:
         return self.plan_mutation(seed)["weights"]
@@ -296,7 +441,7 @@ class StaticScheduler:
                 "reason": "mutation_payoff_only",
             }
         )
-        return plan
+        return self.structure_regulator.adjust_plan(plan)
 
     def record_mutation_outcome(
         self,
@@ -314,6 +459,19 @@ class StaticScheduler:
 
     def export_mutation_stats(self) -> dict[str, object]:
         return self.payoff_tracker.export_mutation_stats()
+
+    def record_execution_feedback(
+        self,
+        *,
+        result,
+        bug_site_key: str,
+        is_new: bool,
+    ) -> dict[str, float]:
+        return self.structure_regulator.observe(
+            bug_type=str(getattr(result, "bug_type", "") or ""),
+            bug_site_key=bug_site_key,
+            is_new=is_new,
+        )
 
 
 class FixedScheduler:

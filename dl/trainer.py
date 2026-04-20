@@ -25,7 +25,7 @@ def _normalize_seed(seed: bytes, max_len: int) -> list[int]:
     the parser never meaningfully processes).
     Pads or truncates to exactly max_len bytes.
     """
-    normalized = [b if 0x20 <= b <= 0x7e else 0 for b in seed[:max_len]]
+    normalized = list(seed[:max_len])
     normalized += [0] * max(0, max_len - len(seed))
     return normalized
 

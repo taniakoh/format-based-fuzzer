@@ -123,10 +123,6 @@ def derive_bug_site(
             "filename": filename,
             "lineno": lineno,
         }
-        # Invalidity findings are deduplicated by source location alone so
-        # parser wording changes on the same rejection site do not inflate counts.
-        if bug_type_str != "invalidity":
-            payload["exception_class"] = exception_class
         return payload
 
     frames = _parse_traceback_frames(traceback_text)
@@ -281,6 +277,8 @@ class MetricsCollector:
         self._unique_finding_entries: dict[str, dict[str, object]] = {}
         self._crash_signatures: set[str] = set()
         self._run_metadata: dict[str, object] = {}
+        self._hash_replay_cache: dict[str, dict[str, object]] = {}
+        self._hash_replay_executor = None
         self._out = out_dir if out_dir is not None else RESULTS_DIR / target
         (self._out / "crashes").mkdir(parents=True, exist_ok=True)
         (self._out / "logs").mkdir(parents=True, exist_ok=True)
@@ -292,6 +290,7 @@ class MetricsCollector:
         self._unique_findings_path = self._out / "unique_findings.json"
         self._bug_coverage_summary_path = self._out / "bug_coverage_summary.json"
         self._bug_counts_path = self._out / "logs" / "bug_counts.csv"
+        self._bug_counts_raw_path = self._out / "logs" / "bug_counts_raw.csv"
         self._write_unique_bugs()
         self._write_unique_findings()
         self._write_bug_coverage_summary()
@@ -357,10 +356,74 @@ class MetricsCollector:
         """Persist a concise DL run summary."""
         self._write_dl_summary(summary)
 
+    def _confirm_frida_crash(self, input_str: str, result) -> dict[str, object]:
+        from fuzzer.executor import BugType, Executor
+
+        replay_info = {
+            "attempted": False,
+            "confirmed": False,
+            "status": "not_applicable",
+            "replay_bug_type": "",
+            "replay_exception": "",
+        }
+
+        if self._run_metadata.get("executor_mode") != "Frida":
+            return replay_info
+        if result.bug_type not in (BugType.CRASH, BugType.TIMEOUT):
+            return replay_info
+        if getattr(result, "is_instrumentation_noise", False):
+            return replay_info
+
+        # Frida is currently unstable on this machine, so any Frida-reported
+        # crash or timeout is retained as a logged finding but excluded from
+        # trusted headline crash counts until the backend is fixed.
+        result.force_instrumentation_noise = True
+        replay_info.update(
+            {
+                "status": "suppressed_untrusted_frida_backend",
+                "replay_exception": "Frida crash/timeouts are untrusted on this machine",
+            }
+        )
+        return replay_info
+
+        cached = self._hash_replay_cache.get(input_str)
+        if cached is not None:
+            replay_info.update(cached)
+        else:
+            replay_info["attempted"] = True
+            try:
+                if self._hash_replay_executor is None:
+                    self._hash_replay_executor = Executor(self.target, coverage_mode="hash")
+                replay_result = self._hash_replay_executor._run_binary(input_str)
+                replay_bug_type = str(getattr(replay_result, "bug_type", "") or "")
+                replay_exception = str(getattr(replay_result, "exception_msg", "") or "")
+                replay_info.update(
+                    {
+                        "status": "completed",
+                        "replay_bug_type": replay_bug_type,
+                        "replay_exception": replay_exception,
+                        "confirmed": replay_bug_type in (BugType.CRASH, BugType.TIMEOUT),
+                    }
+                )
+            except Exception as exc:
+                replay_info.update(
+                    {
+                        "status": f"replay_failed: {exc}",
+                        "replay_exception": str(exc),
+                    }
+                )
+            self._hash_replay_cache[input_str] = dict(replay_info)
+
+        if replay_info["attempted"] and not replay_info["confirmed"] and replay_info["status"] == "completed":
+            result.force_instrumentation_noise = True
+
+        return replay_info
+
     def record_execution(self, input_data: bytes, result, bitmap: bytes | None = None) -> None:
         """Record one fuzzer execution result."""
         self.metrics.total_executions += 1
         input_str = input_data.decode("latin-1", errors="replace")
+        replay_info = self._confirm_frida_crash(input_str, result)
 
         from fuzzer.executor import BugType
         if result.bug_type == BugType.PASS:
@@ -400,13 +463,14 @@ class MetricsCollector:
             self._unique_bug_entries[bug_site_key] = {
                 **self._finding_entry(result, signature, input_str, bug_site),
                 "bug_type": result.bug_type,
+                "site_hit_count": 1,
                 "total_occurrences": 1,
             }
             self._write_unique_bugs()
         elif result.is_real_bug:
-            self._unique_bug_entries[bug_site_key]["total_occurrences"] = (
-                int(self._unique_bug_entries[bug_site_key].get("total_occurrences", 1)) + 1
-            )
+            updated_count = int(self._unique_bug_entries[bug_site_key].get("site_hit_count", 1)) + 1
+            self._unique_bug_entries[bug_site_key]["site_hit_count"] = updated_count
+            self._unique_bug_entries[bug_site_key]["total_occurrences"] = updated_count
             self._write_unique_bugs()
 
         if signature_key not in self._unique_finding_entries:
@@ -431,6 +495,10 @@ class MetricsCollector:
             "input": input_str,
             "bug_type": result.bug_type,
             "instrumentation_noise": bool(getattr(result, "is_instrumentation_noise", False)),
+            "frida_crash_untrusted": (
+                self._run_metadata.get("executor_mode") == "Frida"
+                and result.bug_type in ("CRASH", "TIMEOUT")
+            ),
             "classification": _taxonomy_payload(result),
             "signature": {k: v for k, v in signature.items() if k != "key"},
             "bug_site": {k: v for k, v in bug_site.items() if k != "key"},
@@ -452,6 +520,7 @@ class MetricsCollector:
                 "shape": getattr(result.oracle, "shape", ""),
                 "normalized": getattr(result.oracle, "normalized", None),
             },
+            "hash_replay_confirmation": replay_info,
         }
         with open(self._out / "bugs.jsonl", "a", encoding="utf-8") as f:
             f.write(json.dumps(entry) + "\n")
@@ -516,7 +585,9 @@ class MetricsCollector:
                 f"{_coverage_percent(self.metrics.behaviors_covered):.6f}",
                 self.metrics.interesting_test_case_count,
                 corpus_size,
-                self.metrics.unique_bug_count,
+                # Keep the graph aligned with logs/bug_counts.csv by plotting
+                # parser-site deduplicated bug sites rather than only real bugs.
+                self.metrics.parser_site_unique_bug_count,
                 self.metrics.unique_crashes,
                 self.metrics.validity_bugs,
                 self.metrics.functional_bugs,
@@ -602,7 +673,8 @@ class MetricsCollector:
         entries.sort(key=lambda item: int(item["first_seen_exec"]))
         payload = {
             "target": self.target,
-            "count_definition": "Real bugs deduplicated by canonical bug site. For invalidity, the key is source filename and line when available; other bug types also include the exception class. When no source location is available, dedup falls back to normalized exception fields and finally exception text.",
+            "count_definition": "Real bugs deduplicated by canonical bug site using source filename and line when available, regardless of exception class. When no source location is available, dedup falls back to normalized exception fields and finally exception text.",
+            "entry_count_field": "site_hit_count",
             "unique_bug_count": self.metrics.unique_bug_count,
             "parser_site_unique_bug_count": self.metrics.parser_site_unique_bug_count,
             "traceback_unique_bug_count": self.metrics.traceback_unique_bugs,
@@ -736,41 +808,61 @@ class MetricsCollector:
             encoding="utf-8",
         )
 
-    def _write_bug_counts_csv(self) -> None:
-        rows: dict[str, dict[str, object]] = {}
+    def _iter_bug_entries(self) -> list[dict[str, object]]:
+        entries: list[dict[str, object]] = []
         bugs_path = self._out / "bugs.jsonl"
-        if bugs_path.exists():
-            for line in bugs_path.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
-                    continue
-                entry = json.loads(line)
-                if bool(entry.get("instrumentation_noise", False)):
-                    continue
-                bug_type = str(entry.get("bug_type", "unknown"))
-                exception = str(entry.get("exception", "") or "")
-                parser_bug_site = entry.get("parser_bug_site", {}) or {}
-                site = derive_bug_site(
-                    bug_type=bug_type,
-                    exception=exception,
-                    traceback_text=str(entry.get("traceback", "") or ""),
-                    parser_bug_site={
-                        "bug_type": parser_bug_site.get("bug_type"),
-                        "exc_type": parser_bug_site.get("exc_type", ""),
-                        "filename": parser_bug_site.get("filename", ""),
-                        "lineno": parser_bug_site.get("lineno", None),
-                    },
-                )
-                row_key = str(site["key"])
-                if row_key not in rows:
-                    rows[row_key] = {
-                        "bug_type": bug_type,
-                        "exc_type": str(site.get("exception_class", "") or ""),
-                        "exc_message": exception,
-                        "filename": str(site.get("filename", "") or ""),
-                        "lineno": "" if site.get("lineno", None) is None else int(site["lineno"]),
-                        "count": 0,
-                    }
-                rows[row_key]["count"] = int(rows[row_key]["count"]) + 1
+        if not bugs_path.exists():
+            return entries
+
+        for line in bugs_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            entries.append(json.loads(line))
+        return entries
+
+    def _write_bug_counts_csv(self) -> None:
+        raw_rows: list[dict[str, object]] = []
+        rows: dict[str, dict[str, object]] = {}
+        for entry in self._iter_bug_entries():
+            bug_type = str(entry.get("bug_type", "unknown"))
+            exception = str(entry.get("exception", "") or "")
+            parser_bug_site = entry.get("parser_bug_site", {}) or {}
+            site = derive_bug_site(
+                bug_type=bug_type,
+                exception=exception,
+                traceback_text=str(entry.get("traceback", "") or ""),
+                parser_bug_site={
+                    "bug_type": parser_bug_site.get("bug_type"),
+                    "exc_type": parser_bug_site.get("exc_type", ""),
+                    "filename": parser_bug_site.get("filename", ""),
+                    "lineno": parser_bug_site.get("lineno", None),
+                },
+            )
+            instrumentation_noise = bool(entry.get("instrumentation_noise", False))
+            raw_rows.append(
+                {
+                    "exec": int(entry.get("exec", 0) or 0),
+                    "bug_type": bug_type,
+                    "exc_type": str(site.get("exception_class", "") or ""),
+                    "exc_message": exception,
+                    "filename": str(site.get("filename", "") or ""),
+                    "lineno": "" if site.get("lineno", None) is None else int(site["lineno"]),
+                    "instrumentation_noise": int(instrumentation_noise),
+                }
+            )
+            if instrumentation_noise:
+                continue
+            row_key = str(site["key"])
+            if row_key not in rows:
+                rows[row_key] = {
+                    "bug_type": bug_type,
+                    "exc_type": str(site.get("exception_class", "") or ""),
+                    "exc_message": exception,
+                    "filename": str(site.get("filename", "") or ""),
+                    "lineno": "" if site.get("lineno", None) is None else int(site["lineno"]),
+                    "count": 0,
+                }
+            rows[row_key]["count"] = int(rows[row_key]["count"]) + 1
 
         ordered_rows = sorted(
             rows.values(),
@@ -793,6 +885,29 @@ class MetricsCollector:
                     row["filename"],
                     row["lineno"],
                     row["count"],
+                ])
+        with open(self._bug_counts_raw_path, "w", encoding="utf-8", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["exec", "bug_type", "exc_type", "exc_message", "filename", "lineno", "instrumentation_noise"])
+            for row in sorted(
+                raw_rows,
+                key=lambda row: (
+                    int(row["exec"]),
+                    str(row["bug_type"]),
+                    str(row["filename"]),
+                    "" if row["lineno"] == "" else f"{int(row['lineno']):09d}",
+                    str(row["exc_type"]),
+                    str(row["exc_message"]),
+                ),
+            ):
+                writer.writerow([
+                    row["exec"],
+                    row["bug_type"],
+                    row["exc_type"],
+                    row["exc_message"],
+                    row["filename"],
+                    row["lineno"],
+                    row["instrumentation_noise"],
                 ])
 
     def _write_dl_summary(self, payload: dict) -> None:
@@ -850,6 +965,10 @@ class MetricsCollector:
             if m.time_to_first_crash is not None
             else "Time-to-1st-crash: N/A",
         ]
+        if self._run_metadata.get("executor_mode") == "Frida":
+            lines.append(
+                "Crash trust note: Frida crash/timeouts are excluded from headline crash counts on this machine"
+            )
         summary_path = self._out / "bug_coverage_summary.json"
         if summary_path.exists():
             payload = json.loads(summary_path.read_text(encoding="utf-8"))

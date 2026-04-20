@@ -162,6 +162,7 @@ python evaluation/oracle_checks.py
 # Start from a clean slate
 python3 main.py ipv4 --time-budget 100 --fresh-start
 
+python3 main.py ipv6 --time-budget 100 --fresh-start
 
 ```
 

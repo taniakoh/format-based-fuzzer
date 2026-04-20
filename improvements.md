@@ -2,6 +2,95 @@
 
 Use this file to record meaningful improvements, refactors, feature additions, performance work, and reliability upgrades.
 
+## 2026-04-20
+
+### Target IPv6 compressed-edge bug shapes
+Improvements:
+- Expanded the IPv6 seed corpus with curated malformed compressed-address cases such as `:::`, `1:::2`, `::::`, compressed-overflow variants, and extra-group combinations.
+- Added IPv6 semantic mutator operations that explicitly synthesize triple-colon and compressed-overflow shapes instead of relying on generic colon damage.
+- Rebalanced IPv6 generation so more mutations stay near valid compressed forms while still crossing into the parser's narrow malformed-address bug paths.
+
+Reasons:
+- The IPv6 campaign was spending most of its executions on generic junk that collapsed into parser-reported `bonus` and `ParseException` outcomes before reaching the interesting compressed-address edge cases.
+- The decompiled IPv6 parser appears to have narrow bugs around `:::` handling and structured token overflows, which need targeted inputs rather than random havoc.
+
+Key files changed:
+- `fuzzer/seed_generator.py`
+- `fuzzer/mutation/tier2_semantic.py`
+
+### Add URL unseen-testing onboarding guide
+Improvements:
+- Added `unseen_testing.md` with a practical guide for using an LLM to onboard URL as a new unseen-format benchmark.
+- Included a reusable prompt template, the repository context to provide, starter valid and invalid URL inputs, and oracle/mutation guidance tailored to this fuzzing pipeline.
+
+Reasons:
+- The repository already has a staged unseen-format evaluation plan, but there was not yet a single concise note describing what to ask the LLM to generate and which URL inputs to prepare.
+- A focused guide lowers setup friction and makes URL onboarding more reproducible across runs and collaborators.
+
+Key files changed:
+- `unseen_testing.md`
+- `improvements.md`
+
+### Add validity-aware exploration shaping across structured formats
+Improvements:
+- Downweighted shallow invalidity discoveries in the main fuzz loop so corpus growth, scheduler payoff, and DL training favor valid-input exploration and real bug signal.
+- Added oracle-guided semantic operation selection plus valid-example recovery mutations for IPv4, IPv6, CIDRize, and JSON-family targets.
+
+Reasons:
+- Hybrid guidance was over-rewarding novel malformed inputs, especially on IPv4, which flooded runs with invalidity findings and starved valid neighborhoods.
+- The same reward-path issue affected the other structured formats because they share the corpus, scheduler, and semantic-mutation pipeline.
+
+Key files changed:
+- `main.py`
+- `fuzzer/mutation/tier2_semantic.py`
+
+## 2026-04-15
+
+### Add a concrete ISO-8601 transfer benchmark to the testing plan
+Improvements:
+- Extended `testingplan.md` with one fully specified held-out-format benchmark using ISO-8601 datetime strings.
+- Added a precise accepted subset, stdlib-based oracle strategy, onboarding budgets, seed examples, and a reusable scorecard template.
+- Added concrete success criteria so transfer performance can be judged against the custom-mutation upper bound rather than only described qualitatively.
+
+Reasons:
+- The earlier transfer section explained how to evaluate new-format onboarding, but it still required choosing a format and defining the oracle and reporting structure.
+- ISO-8601 is a good single-format benchmark because it has optional structure, real semantic constraints, and a practical oracle path in Python.
+- A concrete benchmark makes the plan directly executable for this repository instead of leaving key evaluation choices underspecified.
+
+Key files changed:
+- `testingplan.md`
+- `improvements.md`
+
+### Add new-format onboarding benchmark to the testing plan
+Improvements:
+- Extended `testingplan.md` with a dedicated benchmarking subsection for evaluating transfer to previously unseen formats.
+- Added staged onboarding budgets (`config-only`, `config+hints`, `custom mutator`) so the benchmark measures low-effort format absorption separately from hand-written upper bounds.
+- Added recommended held-out formats, transfer-focused metrics, and success criteria centered on how close the generic path gets to the custom-mutation path.
+
+Reasons:
+- The existing benchmarking plan focused on performance across current targets but did not directly answer whether the fuzzer generalises well to a genuinely new format.
+- The repository already has a meaningful config-driven onboarding path, so the evaluation should measure that capability explicitly rather than only full custom extensions.
+- A staged transfer benchmark better matches the lessons from structured-input fuzzing papers, where the real question is how much manual format knowledge is still required.
+
+Key files changed:
+- `testingplan.md`
+- `improvements.md`
+
+### Align testing plan with NEUZZ and NEUZZ++ methodology
+Improvements:
+- Updated `testingplan.md` to distinguish between normal online warm-up for `hybrid_dl` runs and the separate bootstrap checkpoint required for the frozen-model A4 ablation.
+- Added NEUZZ++ as the preferred modern neural-program-smoothing baseline and tightened the benchmarking guidance around repeated trials, common replayed coverage metrics, and matched time budgets.
+- Revised the plan so opaque PyInstaller targets use rolling hold-out validation and staged run budgets, while shared-source targets (`cJSON`, `LAVA-M`) keep the closer-to-NEUZZ setup.
+
+Reasons:
+- The current implementation already trains online and keeps the scheduler static until it has enough samples and training rounds, so the previous plan overstated the need for an offline initial-training phase.
+- A4 needed a documented bootstrap-checkpoint procedure; otherwise `--no-retrain` plus `--fresh-start` would measure an untrained model rather than a frozen warm-start surrogate.
+- NEUZZ++ provides stronger guidance for evaluating ML-guided fuzzers credibly, especially around run counts and common comparison metrics.
+
+Key files changed:
+- `testingplan.md`
+- `improvements.md`
+
 ## 2026-04-15
 
 ### Add environment template for bootstrap LLM settings
@@ -615,3 +704,58 @@ Key files changed:
 - `evaluation/oracle_checks.py`
 - `setup.md`
 - `requirements.txt`
+## 2026-04-15
+
+### Rare-edge corpus prioritization
+Improvements:
+- Added rarity-aware coverage observation so each execution now scores how uncommon its exercised bitmap slots are.
+- Fed rare-edge scores into corpus heating and new-seed priority so unusual behaviors remain selectable longer.
+- Logged rarity in new-seed console output to make path-discovery dynamics easier to inspect during runs.
+
+Reasons:
+- Binary new/not-new feedback was keeping some uncommon-but-useful seeds too cold in the queue.
+- Rare-slot prioritization helps spend expensive executions on inputs that are more likely to branch into underexplored logic.
+
+Key files changed:
+- fuzzer/coverage.py
+- fuzzer/corpus.py
+- main.py
+- evaluation/oracle_checks.py
+
+## 2026-04-18
+
+### Strengthen hybrid DL guidance and seed diversity
+Improvements:
+- Switched the surrogate to a less lossy raw-byte encoding, expanded its input window and proxy coverage dimension, and widened the encoder so accuracy-first runs can distinguish more structured inputs.
+- Replaced the old new-behavior-only DL buffer with a mixed rolling buffer that keeps new behaviors, parser near-misses, and sampled non-new executions for denser training feedback.
+- Added family-aware field ranking and guidance blending so productive seed families receive stronger targeted mutation help.
+- Expanded the IPv4 and IPv6 seed generators with curated valid and structured-invalid starter corpora before filling the rest of the initial queue randomly.
+
+Reasons:
+- The previous DL setup was underfed and overcompressed, which limited its ability to learn useful distinctions on slow targets where each execution is expensive.
+- Mixed training examples and stronger initial corpus diversity give the surrogate and payoff tracker better structural coverage earlier in the run.
+
+Key files changed:
+- main.py
+- dl/surrogate.py
+- dl/trainer.py
+- fuzzer/scheduler.py
+- fuzzer/seed_generator.py
+
+## 2026-04-19
+
+### Add generalized shallow-rejection cooling
+Improvements:
+- Added a format-agnostic structure regulator that watches recent invalidity-heavy runs, detects repeated shallow rejection sites, and shifts mutation plans toward more structure-preserving operator mixes.
+- Taught both the static payoff scheduler and hybrid DL scheduler to apply that regulator before emitting mutation plans.
+- Added parent-seed cooling so corpus entries that repeatedly reproduce the same shallow rejection buckets lose priority faster.
+
+Reasons:
+- The previous feedback loops learned operator payoff, but they did not explicitly react when the campaign got trapped rediscovering the same parser rejection sites.
+- Cooling repeated shallow rejections is a generalized policy that works across structured formats without hardcoding IPv4-only invariants.
+
+Key files changed:
+- main.py
+- fuzzer/corpus.py
+- fuzzer/scheduler.py
+- dl/surrogate.py

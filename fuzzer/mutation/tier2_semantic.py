@@ -15,6 +15,8 @@ import random
 import re
 from dataclasses import dataclass
 
+from fuzzer.oracle import evaluate_target_input
+
 
 @dataclass(frozen=True)
 class SemanticSpan:
@@ -223,6 +225,26 @@ class SemanticMutator(abc.ABC):
             if span.matches(pos):
                 return span.name
         return default
+
+    def _oracle_guided_operation(
+        self,
+        target_name: str,
+        data: bytes,
+        *,
+        preferred_ops: list[str] | tuple[str, ...],
+        valid_bias: float = 0.80,
+        repair_bias: float = 0.70,
+    ) -> str:
+        preferred = [op for op in preferred_ops if op in self.operations]
+        if not preferred:
+            return random.choice(self.operations)
+
+        verdict = evaluate_target_input(target_name, self._decode(data))
+        if verdict.supported and verdict.expected_valid is True and random.random() < valid_bias:
+            return random.choice(preferred)
+        if verdict.supported and verdict.expected_valid is False and random.random() < repair_bias:
+            return random.choice(preferred)
+        return random.choice(self.operations)
 
 
 class PassThroughMutator(SemanticMutator):
@@ -833,12 +855,20 @@ def get_mutator(format_name: str, fmt_config: dict | None = None) -> SemanticMut
 class JSONSemanticMutator(SemanticMutator):
     OPERATIONS = [
         "literal_swap",
+        "container_wrap",
+        "replace_with_valid_example",
         "quote_damage",
         "comma_damage",
         "colon_damage",
         "bracket_flip",
         "duplicate_fragment",
         "delete_fragment",
+        "whitespace_injection",
+    ]
+    VALID_FOCUSED_OPS = [
+        "literal_swap",
+        "container_wrap",
+        "replace_with_valid_example",
         "whitespace_injection",
     ]
 
@@ -870,7 +900,11 @@ class JSONSemanticMutator(SemanticMutator):
         hot_bytes: list[int] | None = None,
         preferred_fields: list[str] | None = None,
     ) -> bytes:
-        op = random.choice(self.operations)
+        op = self._oracle_guided_operation(
+            "json",
+            data,
+            preferred_ops=self.VALID_FOCUSED_OPS,
+        )
         try:
             mutated, field = getattr(self, f"_{op}")(
                 data,
@@ -905,6 +939,36 @@ class JSONSemanticMutator(SemanticMutator):
         if chosen is None:
             return replacement.encode(), "literal"
         return (s[: chosen.start] + replacement + s[chosen.end :]).encode(), "literal"
+
+    def _container_wrap(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:  # noqa: ARG002
+        s = self._decode(data).strip()
+        if not s:
+            return b"{}", "root"
+        wrapped = random.choice([
+            f"[{s}]",
+            f'{{"value":{s}}}',
+        ])
+        return wrapped.encode(), "root"
+
+    def _replace_with_valid_example(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:  # noqa: ARG002
+        example = random.choice([
+            "{}",
+            "[]",
+            '{"value":1}',
+            '{"enabled":true,"count":0}',
+            '[0,1,2]',
+        ])
+        return example.encode(), "root"
 
     def _quote_damage(
         self,
@@ -1027,6 +1091,9 @@ class IPv4SemanticMutator(SemanticMutator):
     OPERATIONS = [
         "octet_boundary",
         "leading_zeros",
+        "neighbor_octet",
+        "swap_octets",
+        "replace_with_valid_example",
         "extra_octets",
         "missing_octets",
         "wrong_separator",
@@ -1035,6 +1102,13 @@ class IPv4SemanticMutator(SemanticMutator):
         "hex_octet",
         "empty_octet",
         "whitespace_injection",
+    ]
+    VALID_FOCUSED_OPS = [
+        "octet_boundary",
+        "leading_zeros",
+        "neighbor_octet",
+        "swap_octets",
+        "replace_with_valid_example",
     ]
 
     def get_semantic_spans(self, data: bytes) -> list[SemanticSpan]:
@@ -1046,7 +1120,11 @@ class IPv4SemanticMutator(SemanticMutator):
         hot_bytes: list[int] | None = None,
         preferred_fields: list[str] | None = None,
     ) -> bytes:
-        op = random.choice(self.operations)
+        op = self._oracle_guided_operation(
+            "ipv4",
+            data,
+            preferred_ops=self.VALID_FOCUSED_OPS,
+        )
         try:
             mutated, field = getattr(self, f"_{op}")(
                 data,
@@ -1094,6 +1172,57 @@ class IPv4SemanticMutator(SemanticMutator):
         except ValueError:
             pass
         return ".".join(parts).encode(), f"octet{idx + 1}"
+
+    def _neighbor_octet(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        parts = s.split(".")
+        if len(parts) != 4:
+            return self._replace_with_valid_example(data, hot_bytes, preferred_fields)
+        idx = self._guided_segment_index(s, ".", "octet", hot_bytes, preferred_fields)
+        try:
+            current = int(parts[idx], 10)
+        except ValueError:
+            return self._replace_with_valid_example(data, hot_bytes, preferred_fields)
+        delta = random.choice([-16, -8, -1, 1, 8, 16])
+        parts[idx] = str(max(0, min(255, current + delta)))
+        return ".".join(parts).encode(), f"octet{idx + 1}"
+
+    def _swap_octets(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        parts = s.split(".")
+        if len(parts) != 4:
+            return self._replace_with_valid_example(data, hot_bytes, preferred_fields)
+        idx1 = self._guided_segment_index(s, ".", "octet", hot_bytes, preferred_fields)
+        idx2 = (idx1 + random.choice([1, 2, 3])) % 4
+        parts[idx1], parts[idx2] = parts[idx2], parts[idx1]
+        return ".".join(parts).encode(), f"octet{idx1 + 1}"
+
+    def _replace_with_valid_example(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:  # noqa: ARG002
+        example = random.choice([
+            "0.0.0.0",
+            "1.2.3.4",
+            "10.0.0.1",
+            "127.0.0.1",
+            "192.168.0.1",
+            "254.99.254.199",
+            "255.255.255.255",
+        ])
+        return example.encode(), "octet1"
 
     def _extra_octets(
         self,
@@ -1229,7 +1358,10 @@ class IPv4SemanticMutator(SemanticMutator):
 class IPv6SemanticMutator(SemanticMutator):
     OPERATIONS = [
         "group_boundary",
+        "replace_with_valid_example",
         "double_colon_position",
+        "triple_colon",
+        "compressed_overflow",
         "mixed_notation",
         "extra_groups",
         "missing_groups",
@@ -1241,6 +1373,18 @@ class IPv6SemanticMutator(SemanticMutator):
         "colon_run",
         "empty_group",
         "whitespace_injection",
+    ]
+    VALID_FOCUSED_OPS = [
+        "group_boundary",
+        "leading_zeros",
+        "mixed_notation",
+        "replace_with_valid_example",
+        "double_colon_position",
+        "triple_colon",
+        "compressed_overflow",
+        "overflow_group",
+        "multiple_double_colons",
+        "colon_run",
     ]
 
     def get_semantic_spans(self, data: bytes) -> list[SemanticSpan]:
@@ -1256,7 +1400,11 @@ class IPv6SemanticMutator(SemanticMutator):
         hot_bytes: list[int] | None = None,
         preferred_fields: list[str] | None = None,
     ) -> bytes:
-        op = random.choice(self.operations)
+        op = self._oracle_guided_operation(
+            "ipv6",
+            data,
+            preferred_ops=self.VALID_FOCUSED_OPS,
+        )
         try:
             mutated, field = getattr(self, f"_{op}")(
                 data,
@@ -1286,6 +1434,22 @@ class IPv6SemanticMutator(SemanticMutator):
         parts[idx] = random.choice(["0", "1", "ffff", "8000", "7fff", "0000"])
         return ":".join(parts).encode(), f"group{idx + 1}"
 
+    def _replace_with_valid_example(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:  # noqa: ARG002
+        example = random.choice([
+            "::",
+            "::1",
+            "2001:db8::1",
+            "fe80::1",
+            "::ffff:192.0.2.33",
+            "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+        ])
+        return example.encode(), "group1"
+
     def _double_colon_position(
         self,
         data: bytes,
@@ -1304,6 +1468,74 @@ class IPv6SemanticMutator(SemanticMutator):
         parts.insert(insert_pos, "")
         parts.insert(insert_pos, "")
         return ":".join(parts).encode(), f"group{min(insert_pos + 1, 8)}"
+
+    def _triple_colon(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        spans = self.get_semantic_spans(data)
+        if "::" in s:
+            idx = s.index("::")
+            return (s[:idx] + ":::" + s[idx + 2 :]).encode(), self._field_for_position(
+                spans, idx, default="group1"
+            )
+
+        colon_positions = [
+            i for i, ch in enumerate(s)
+            if ch == ":" and (i == 0 or s[i - 1] != ":") and (i + 1 >= len(s) or s[i + 1] != ":")
+        ]
+        if colon_positions:
+            pos = self._guided_char_index(
+                s,
+                colon_positions,
+                hot_bytes,
+                preferred_fields=preferred_fields,
+                spans=spans,
+            )
+            if pos is not None:
+                return (s[:pos] + ":::" + s[pos + 1 :]).encode(), self._field_for_position(
+                    spans, pos, default="group1"
+                )
+
+        if s:
+            pos = self._guided_insert_position(s, hot_bytes, preferred_fields, spans)
+            return (s[:pos] + ":::" + s[pos:]).encode(), self._field_for_position(
+                spans, pos, default="group1"
+            )
+        return b":::", "group1"
+
+    def _compressed_overflow(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        if not s:
+            return b"1:::2", "group1"
+
+        spans = self.get_semantic_spans(data)
+        if "::" not in s:
+            valid_base = random.choice([
+                "::1",
+                "2001:db8::1",
+                "fe80::1",
+                "::ffff:192.0.2.33",
+            ])
+            s = valid_base
+
+        variant = random.choice([
+            lambda text: text + ":" + random.choice(["1", "ffff", "dead"]),
+            lambda text: text + "::",
+            lambda text: text.replace("::", ":::", 1),
+            lambda text: text.replace("::", "::" + random.choice(["1:", "ffff:", "dead:"]), 1),
+        ])
+        mutated = variant(s)
+        pos = max(mutated.find("::"), 0)
+        return mutated.encode(), self._field_for_position(spans, pos, default="group1")
 
     def _mixed_notation(
         self,
@@ -1503,6 +1735,7 @@ class IPv6SemanticMutator(SemanticMutator):
 class CidrizeSemanticMutator(SemanticMutator):
     OPERATIONS = [
         "address_boundary",
+        "replace_with_valid_example",
         "cidr_prefix",
         "cidr_missing_prefix",
         "range_flip",
@@ -1513,6 +1746,11 @@ class CidrizeSemanticMutator(SemanticMutator):
         "family_mix",
         "token_duplication",
         "whitespace_injection",
+    ]
+    VALID_FOCUSED_OPS = [
+        "address_boundary",
+        "replace_with_valid_example",
+        "wildcard_expand",
     ]
 
     _IPV4_TOKEN_RE = re.compile(r"\d+(?:\.\d+){3}")
@@ -1552,7 +1790,11 @@ class CidrizeSemanticMutator(SemanticMutator):
         hot_bytes: list[int] | None = None,
         preferred_fields: list[str] | None = None,
     ) -> bytes:
-        op = random.choice(self.operations)
+        op = self._oracle_guided_operation(
+            "cidrize",
+            data,
+            preferred_ops=self.VALID_FOCUSED_OPS,
+        )
         try:
             mutated, field = getattr(self, f"_{op}")(
                 data,
@@ -1631,6 +1873,23 @@ class CidrizeSemanticMutator(SemanticMutator):
         if match is None:
             return random.choice(replacements).encode(), "address"
         return self._replace_match(s, match, random.choice(replacements)).encode(), "address"
+
+    def _replace_with_valid_example(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:  # noqa: ARG002
+        example = random.choice([
+            "192.0.2.33",
+            "2001:db8::1",
+            "192.0.2.0/24",
+            "2001:db8::/64",
+            "192.0.2.80-192.0.2.85",
+            "192.0.2.170-175",
+            "192.0.2.[5678]",
+        ])
+        return example.encode(), "address"
 
     def _cidr_prefix(
         self,
