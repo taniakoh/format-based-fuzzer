@@ -811,3 +811,20 @@ Key files changed:
 - fuzzer/json_atheris_harness.py
 - main.py
 - evaluation/json_coverage_replay.py
+
+## 2026-04-22
+
+### Stop Linux runs from falling back to Windows parser binaries
+Improvements:
+- Changed the IPv4 and IPv6 Linux target configs to use repo-relative parser paths instead of a hardcoded `/home/tanta/...` location.
+- Updated the executor to raise a clear `FileNotFoundError` on Linux when a configured `binary_linux` path is missing, instead of silently falling back to the Windows `.exe`.
+
+Reasons:
+- On other machines, missing Linux parser paths could cause the fuzzer to attempt launching `win-ipv4-parser.exe` or `win-ipv6-parser.exe` from Linux, which surfaced as misleading permission or execution failures.
+- Repo-relative defaults make cross-machine setup more reliable and keep the failure mode understandable when a binary is genuinely absent.
+
+Key files changed:
+- `config/ipv4_format.json`
+- `config/ipv6_format.json`
+- `fuzzer/executor.py`
+- `codefix.md`

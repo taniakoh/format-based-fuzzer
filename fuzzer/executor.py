@@ -834,6 +834,12 @@ class Executor:
                 self.timeout = timeout_seconds or _LINUX_TIMEOUTS.get(target, TIMEOUT_SECONDS_LINUX)
                 self._mode = "Linux"
             else:
+                if _IS_LINUX and linux_bin is not None and not linux_bin.exists():
+                    raise FileNotFoundError(
+                        f"Linux binary for target '{target}' was configured but not found: {linux_bin}. "
+                        "Update config/{target}_format.json to a valid repo-relative or absolute "
+                        "binary_linux path, or copy the Linux parser binary to the configured location."
+                    )
                 if win_bin is None or not win_bin.exists():
                     raise FileNotFoundError(
                         f"No binary found for target '{target}'. Expected {win_bin} or {linux_bin}."
