@@ -2,6 +2,54 @@
 
 Use this file to record meaningful improvements, refactors, feature additions, performance work, and reliability upgrades.
 
+## 2026-04-21
+
+### Target the remaining IPv6 triple-colon exception path
+Improvements:
+- Added curated full-width IPv6 `:::` seeds that keep 8+ token layouts instead of collapsing immediately into the existing short-token branch.
+- Added a dedicated `triple_colon_full_width` IPv6 semantic mutator that injects `:::` into otherwise full-width addresses.
+- Extended bootstrap checks to lock in both the new seeds and the new mutator output.
+
+Reasons:
+- The previous IPv6 campaign was already reaching the overlong-hextet and token-length exceptions, but not the decompiled branch that checks for a parsed `:::` token after normal-width tokenization.
+- Keeping this malformed shape in both seeds and Tier 2 mutations gives the fuzzer a much better chance of exercising the remaining exception path without relying on havoc luck.
+
+Key files changed:
+- `fuzzer/seed_generator.py`
+- `fuzzer/mutation/tier2_semantic.py`
+- `evaluation/bootstrap_checks.py`
+
+## 2026-04-21
+
+### Add absolute JSON source-coverage replay for Atheris runs
+Improvements:
+- Added a post-run `coverage.py` replay step for JSON Atheris campaigns that replays the saved corpus, writes cumulative source-coverage checkpoints to `results/<target>/coverage_replay.json`, and lets the progress chart use that artifact instead of normalizing against the run's final `cov`.
+
+Reasons:
+- The previous JSON/Atheris coverage panel could only show progress relative to the final observed libFuzzer `cov`, which always ended at `100%` and overstated what the number meant.
+
+Key files changed:
+- `evaluation/json_coverage_replay.py`
+- `main.py`
+- `evaluation/plot_progress.py`
+
+## 2026-04-21
+
+### Sharpen IPv6 parser-specific malformed paths
+Improvements:
+- Expanded the IPv6 seed corpus with malformed embedded-IPv4 suffixes and dangling compressed-tail cases observed in the decompiled parser grammar.
+- Added IPv6 semantic mutator operations that directly synthesize invalid mixed-notation suffixes and `::1:` / `::1::`-style dangling compression tails.
+- Strengthened the extracted-parser probe with direct checks for the `::` false reject plus malformed-address false accepts.
+
+Reasons:
+- The decompiled IPv6 parser accepts a few malformed compressed and mixed-notation families that generic RFC-style mutations do not target often enough.
+- Keeping these parser-specific shapes in seeds, mutations, and regression probes makes the fuzzer more likely to rediscover the real parser bug paths reliably.
+
+Key files changed:
+- `fuzzer/seed_generator.py`
+- `fuzzer/mutation/tier2_semantic.py`
+- `evaluation/ipv6_bug_path_probe.py`
+
 ## 2026-04-20
 
 ### Target IPv6 compressed-edge bug shapes
@@ -9,6 +57,7 @@ Improvements:
 - Expanded the IPv6 seed corpus with curated malformed compressed-address cases such as `:::`, `1:::2`, `::::`, compressed-overflow variants, and extra-group combinations.
 - Added IPv6 semantic mutator operations that explicitly synthesize triple-colon and compressed-overflow shapes instead of relying on generic colon damage.
 - Rebalanced IPv6 generation so more mutations stay near valid compressed forms while still crossing into the parser's narrow malformed-address bug paths.
+- Added `evaluation/ipv6_bug_path_probe.py` to confirm the reachable extracted-parser paths directly, including `InvalidityBug`, `ReliabilityBug`, false accepts, and early `ParseException` rejection.
 
 Reasons:
 - The IPv6 campaign was spending most of its executions on generic junk that collapsed into parser-reported `bonus` and `ParseException` outcomes before reaching the interesting compressed-address edge cases.
@@ -17,15 +66,16 @@ Reasons:
 Key files changed:
 - `fuzzer/seed_generator.py`
 - `fuzzer/mutation/tier2_semantic.py`
+- `evaluation/ipv6_bug_path_probe.py`
 
-### Add URL unseen-testing onboarding guide
+### Add XML unseen-testing onboarding guide
 Improvements:
-- Added `unseen_testing.md` with a practical guide for using an LLM to onboard URL as a new unseen-format benchmark.
-- Included a reusable prompt template, the repository context to provide, starter valid and invalid URL inputs, and oracle/mutation guidance tailored to this fuzzing pipeline.
+- Added `unseen_testing.md` with a practical guide for using an LLM to onboard XML as a new unseen-format benchmark.
+- Included a reusable prompt template, the repository context to provide, starter valid and malformed XML inputs, and oracle/mutation guidance tailored to this fuzzing pipeline.
 
 Reasons:
-- The repository already has a staged unseen-format evaluation plan, but there was not yet a single concise note describing what to ask the LLM to generate and which URL inputs to prepare.
-- A focused guide lowers setup friction and makes URL onboarding more reproducible across runs and collaborators.
+- The repository already has a staged unseen-format evaluation plan, but there was not yet a single concise note describing what to ask the LLM to generate and which XML inputs to prepare.
+- XML is a more standard parser benchmark choice than URL and better matches common fuzzing evaluation targets.
 
 Key files changed:
 - `unseen_testing.md`
@@ -759,3 +809,167 @@ Key files changed:
 - fuzzer/corpus.py
 - fuzzer/scheduler.py
 - dl/surrogate.py
+
+## 2026-04-20
+
+### Soften bootstrap seed size guidance
+Improvements:
+- Relaxed the LLM bootstrap prompt so it still prefers compact examples but now explicitly allows the minimal structure needed for parsing.
+
+Reasons:
+- The earlier wording pushed too hard toward tiny seeds and could encourage under-structured examples for formats with a larger parseable minimum.
+
+Key files changed:
+- fuzzer/bootstrap.py
+
+## 2026-04-21
+
+### Document rationale for onboarding new formats
+Improvements:
+- Added contributor-facing documentation explaining why adding a new format matters to this repository's evaluation and architecture story.
+- Clarified that new formats are used to test extensibility, transferability, and where the current pipeline still needs target-specific help.
+
+Reasons:
+- The docs already described how formats plug in, but they did not clearly explain the motivation for adding one.
+- Making that rationale explicit helps keep future format additions aligned with the project's research and engineering goals.
+
+Key files changed:
+- README.md
+- hybrid_fuzzer_impl_guide.md
+
+### Document rationale for using LLM bootstrap on unseen targets
+Improvements:
+- Added a dedicated explanation of why the unseen-target workflow uses an LLM as a bootstrap aid.
+- Clarified that the LLM is intended to generate first-pass target knowledge for onboarding, while the shared fuzzing engine still performs the actual discovery work.
+
+Reasons:
+- The unseen-target guide described how to ask the LLM for artifacts, but it did not clearly explain why the LLM is part of that workflow.
+- Making that rationale explicit helps distinguish offline bootstrap assistance from using an LLM inside the hot mutation loop.
+
+Key files changed:
+- unseen_testing.md
+
+### Add a runnable XML target
+Improvements:
+- Added a first-class `xml` target with config, starter seeds, an XML-aware semantic mutator, and an Atheris harness.
+- Extended the Atheris runner so harness selection and artifact reclassification work for more than just the JSON target.
+- Documented the new XML run path in the main README and setup guide.
+
+Reasons:
+- XML was previously only documented as an unseen-target planning exercise, which meant the repo could not actually run the benchmark.
+- Making XML runnable gives the repository a concrete cross-format target that is easier to evaluate and demo.
+
+Key files changed:
+- config/xml_format.json
+- corpus/xml_seeds.txt
+- fuzzer/xml_atheris_harness.py
+- fuzzer/oracle.py
+- fuzzer/mutation/tier2_semantic.py
+- main.py
+- README.md
+- setup.md
+
+### Auto-load bootstrap OpenAI settings from .env
+Improvements:
+- Added a small dependency-free `.env` loader for the bootstrap path so `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL` are picked up automatically when missing from the shell.
+- Updated the `.env` and `.env.template` guidance to match the new behavior.
+
+Reasons:
+- Bootstrap profile generation depended on environment variables, but the repository already encouraged storing those values in `.env`.
+- Auto-loading the bootstrap settings removes an unnecessary setup step and makes the unseen-target workflow easier to demo and reuse.
+
+Key files changed:
+- fuzzer/bootstrap.py
+- .env
+- .env.template
+## 2026-04-21
+
+### Add Linux persistent parser mode
+Improvements:
+- Added a `--persistent` execution path for Linux `ipv4` and `ipv6` runs that reuses a long-lived worker backed by the extracted parser bundle.
+- Routed persistent executions through the existing executor interface so fuzzing, oracle application, and result recording still work with the faster path.
+- Documented the new throughput-oriented mode in the README.
+
+Reasons:
+- Frida and cold process startup were dominating per-input cost on Linux parser targets.
+- Keeping the parser loaded between executions gives a practical persistent-mode option without replacing the rest of the fuzzer pipeline.
+
+Key files changed:
+- main.py
+- fuzzer/executor.py
+- fuzzer/persistent_worker.py
+- README.md
+
+## 2026-04-21
+
+### Add bugs-over-time plot utility
+Improvements:
+- Added a post-processing script that reconstructs cumulative unique bugs over wall-clock time from existing run artifacts.
+- The utility prefers `unique_bugs.json` plus `oracle_log.csv` for current runs and falls back to `plot_data` when that series is already present.
+- The script emits both `bugs_over_time.csv` and `bugs_over_time.svg` into the selected run directory for direct report use.
+- Integrated the same reconstruction path into the main `plot_progress.py` dashboard so the existing "Unique bugs" panel can render from current artifacts even when `plot_data` does not carry a complete bug timeline.
+- Expanded the canonical `plot_data` schema for normal fuzzing runs to include per-sample bug and crash deltas (`new_unique_bugs`, `new_unique_crashes`) alongside the cumulative totals.
+- Updated the fallback/post-processing `plot_data` writer to synthesize a bugs-over-time series from `oracle_log.csv` and `unique_bugs.json` when execution-time rows are missing.
+
+Reasons:
+- Existing results already tracked bug discovery order and execution-relative timing, but there was no dedicated way to turn that into a bugs-vs-time graph.
+- Producing a lightweight SVG keeps plotting dependency-free and easy to run on archived result folders.
+- Reusing the reconstruction logic inside the existing dashboard keeps the normal plotting workflow intact instead of requiring a separate manual plotting step.
+- Making `plot_data` itself carry bug-event information keeps bugs-over-time exportable from the canonical CSV instead of depending on sidecar reconstruction for every consumer.
+
+Key files changed:
+- evaluation/plot_bugs_over_time.py
+- evaluation/collect_metrics.py
+- evaluation/plot_progress.py
+- main.py
+- improvements.md
+## 2026-04-21
+
+### Prefer Frida line-hit coverage when symbols exist
+Improvements:
+- Updated the Frida Stalker agent to resolve executed addresses to `DebugSymbol` file/line locations and hash those line hits into the existing bitmap.
+- Kept the previous block-edge hashing as an automatic fallback when symbolication is missing, so Linux Frida runs still produce coverage on stripped binaries.
+
+Reasons:
+- The old Frida path only approximated control-flow edges, which made it impossible to treat coverage as a rough source-line signal even when debug metadata was present.
+- Using line hits when available gives the fuzzer a closer approximation to “what code locations executed” without breaking the rest of the bitmap-driven pipeline.
+
+Key files changed:
+- `fuzzer/executor.py`
+- `evaluation/oracle_checks.py`
+- `README.md`
+
+## 2026-04-21
+
+### Broaden directed IPv6 seed and semantic coverage
+Improvements:
+- Expanded curated IPv6 seeds with valid compressed forms, valid embedded-IPv4 forms, and known-invalid compressed-overflow cases that line up with the parser's hidden bug families.
+- Added focused IPv6 semantic mutations that deliberately synthesize valid compressed addresses and valid embedded-IPv4 suffix forms instead of relying on generic colon edits.
+- Added bootstrap regression checks to confirm the IPv6 seed corpus contains these targets and the new semantic operations emit the intended shapes.
+
+Reasons:
+- The fuzzer was still too dependent on luck to reach valid compressed and IPv4-embedded IPv6 addresses that trigger the parser's false rejects, false accepts, and wrong-value behaviors.
+- Making these families first-class seeds and semantic mutations improves reproducibility during short fuzzing runs and gives Tier 2 a better chance of preserving parser-relevant structure.
+
+Key files changed:
+- `fuzzer/seed_generator.py`
+- `fuzzer/mutation/tier2_semantic.py`
+- `config/ipv6_format.json`
+- `evaluation/bootstrap_checks.py`
+## 2026-04-21
+
+### Improve cidrize bug reachability
+Improvements:
+- Added dotted hostname seeds and valid examples for the `cidrize` target to exercise near-valid hostname parsing paths.
+- Added a `hostname_tld_edge` semantic mutation to preserve hostname structure while stressing short and long TLDs.
+- Strengthened repeated-dash seed coverage for `cidrize` separator bugs.
+
+Reasons:
+- The `cidrize` campaign was spending too much effort on early syntax failures in `netaddr`, which reduced reachability of deeper hostname and repeated-separator bug sites.
+- Near-valid hostname mutations give the fuzzer a better chance of reaching the TLD handling bug in `buggy_cidrize/cidrize_stv.py`.
+
+Key files changed:
+- `config/cidrize_format.json`
+- `corpus/cidrize_seeds.txt`
+- `fuzzer/seed_generator.py`
+- `fuzzer/mutation/tier2_semantic.py`

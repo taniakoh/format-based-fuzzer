@@ -18,6 +18,176 @@ Key files changed:
 - ...
 ```
 
+## 2026-04-21
+
+### Restore extracted IPv6 bug surface for fuzzing
+Improvements:
+- Switched the extracted IPv6 persistent worker and source-level helpers back to the original `ipv6_mstv.pyc` bytecode instead of importing the strict repo-local source override.
+- Restored IPv6 parser exception mapping for `functional`, `boundary`, `performance`, `reliability`, and parse-driven `invalidity` classifications in persistent mode.
+- Re-enabled oracle upgrading so valid inputs that the parser rejects are counted as `validity`, and accepted oracle-invalid inputs are counted as `oracle_mismatch`.
+- Added a source fallback when the extracted IPv6 `.pyc` has an incompatible Python magic number so persistent/source tooling can still start under a different interpreter.
+- Hid the extracted bundle root from `sys.path` while loading the IPv6 source fallback so it imports the environment's `pyparsing` instead of the bundle's incompatible `.pyc` copy.
+
+Reasons:
+- The source override made the extracted IPv6 fuzzing path behave like a strict validator, which removed the seeded validity/oracle-mismatch style bug surface and left campaigns disproportionately reporting `bonus`.
+- The executor was also preserving parser-reported `invalidity` on valid IPv6 inputs like `::`, which hid real false-reject bugs from the headline metrics.
+- Loading the original bytecode again keeps the extracted tooling aligned with the intended buggy target for fuzzing and regression reproduction.
+- WSL runs can use a Python version that does not match the extracted `.pyc`, which otherwise crashes the persistent worker before the campaign even starts.
+- Even with source fallback, leaving the extracted bundle first on `sys.path` caused imports like `pyparsing` to resolve to bundled incompatible bytecode and crash during module import.
+
+Key files changed:
+- fuzzer/persistent_worker.py
+- fuzzer/executor.py
+- tools/ip_parser_source_runner.py
+- tools/ip_parser_afl_harness.py
+- evaluation/oracle_checks.py
+
+## 2026-04-21
+
+### Add explicit bonus-path trigger for JSON harness
+Improvements:
+- Added an opt-in `--trigger-bonus` flag to `json-decoder-main/json_decoder_stv.py` that raises a dedicated `BonusBug` after a successful decode.
+- Kept default decoder behavior unchanged so ordinary runs still reflect real parser outcomes.
+
+Reasons:
+- The harness already reported unexpected exceptions as `bonus`, but normal CLI inputs had no clean, intentional way to exercise that path.
+- An explicit trigger makes it possible to validate logging, counting, and coverage for all harness bug buckets without relying on accidental crashes.
+
+Key files changed:
+- `json-decoder-main/json_decoder_stv.py`
+- `codefix.md`
+
+### Reject over-nested JSON arrays without crashing Atheris
+Improvements:
+- Changed the bundled `buggy_json` decoder to translate Python recursion overflows during parse into a normal `JSONDecodeError` for excessive nesting.
+- Added a focused regression check that feeds a deeply nested JSON array and asserts the decoder rejects it cleanly.
+
+Reasons:
+- Deeply nested array inputs were escaping the target as `RecursionError`, which Atheris/libFuzzer treated as a crash artifact instead of a normal invalid-input rejection.
+- Converting this path into a parser error keeps fuzzing runs stable and lets post-processing/replay continue instead of aborting on interpreter recursion limits.
+
+Key files changed:
+- `json-decoder-main/buggy_json/decoder_stv.py`
+- `evaluation/oracle_checks.py`
+
+### Make fresh-start cleanup resilient on WSL Windows mounts
+Improvements:
+- Hardened `--fresh-start` result cleanup to retry directory removal and clear read-only bits before retrying.
+- Added a fallback that clears the contents of the target results directory without deleting the directory itself when WSL cannot remove the mount-backed root folder.
+
+Reasons:
+- JSON runs on WSL against the repo under `/mnt/c/...` could fail before fuzzing started when `shutil.rmtree()` hit `PermissionError` on `results/json`.
+- Fresh-start should behave like a robust cleanup step across Windows/WSL filesystem quirks instead of aborting the whole run.
+
+Key files changed:
+- `main.py`
+
+### Target JSON decoder bug-bearing paths more directly
+Improvements:
+- Expanded the JSON seed generator and Atheris harness seed pool with targeted escape, malformed `\u`, deep-nesting, and oversized-integer families.
+- Added JSON semantic mutator operations that inject bug-bearing escapes, break unicode escape lengths, stress recursion depth, and replace literals with huge integer tokens.
+- Added bootstrap regression checks so these JSON-specific seed and mutator capabilities stay wired in.
+
+Reasons:
+- The bundled buggy decoder hides most of its seeded bugs behind specific string-escape and parser-depth shapes that general JSON mutations reach too slowly.
+- Making those shapes first-class seeds and mutations improves hit rate for `performance_bug`, `wrong_exception_type`, recursion-driven `bonus`, and large-number conversion failures.
+
+Key files changed:
+- `fuzzer/seed_generator.py`
+- `fuzzer/mutation/tier2_semantic.py`
+- `fuzzer/json_atheris_harness.py`
+- `evaluation/bootstrap_checks.py`
+- `config/json_format.json`
+- `corpus/json_seeds.txt`
+
+### Replace fake 100 percent JSON Atheris coverage with replayed source totals
+Improvements:
+- Switched JSON Atheris plotting to prefer a saved `coverage.py` replay artifact that measures cumulative `buggy_json` statement-and-branch coverage across the discovered corpus.
+
+Reasons:
+- The old chart always reached `100%` because it divided each Atheris `cov` sample by that same run's final `cov`, which was a relative progress signal rather than an absolute target-coverage percentage.
+
+Key files changed:
+- `evaluation/json_coverage_replay.py`
+- `main.py`
+- `evaluation/plot_progress.py`
+
+## 2026-04-20
+
+### Replay JSON timeout artifacts before classifying them
+Improvements:
+- Changed JSON Atheris artifact post-processing to replay `timeout-*` and `slow-*` inputs through `buggy_json` instead of classifying them purely from the artifact filename.
+- Added a bounded replay alarm so genuine unreplayed hangs still stay visible as `TIMEOUT`, while reproducing inputs collapse onto the real `PerformanceBug` traceback site.
+
+Reasons:
+- Generic timeout filenames were creating noisy duplicate findings such as `Buggy JSON decoder timed out` even when the same input deterministically raised the intended `PerformanceBug`.
+- Replaying the artifact gives source-location deduplication and keeps JSON reports closer to the binary-target reporting style.
+
+Key files changed:
+- `main.py`
+- `codefix.md`
+
+## 2026-04-21
+
+### Fix evaluation graph generation for Atheris rows
+Improvements:
+- Added `interesting_test_cases` to the row shape produced from `atheris.log`, using corpus size so the evaluation graph renderer sees the same fallback metric as CSV-backed runs.
+
+Reasons:
+- `python evaluation/plot_progress.py json` could finish `progress.svg` and then crash on `eval_graphs.svg` generation with `KeyError: 'interesting_test_cases'`.
+
+Key files changed:
+- `evaluation/plot_progress.py`
+- `codefix.md`
+
+## 2026-04-20
+
+### JSON harness explores a small decoder mode set
+Improvements:
+- Added a deterministic mode selector to the JSON Atheris harness so part of the campaign exercises `strict=False`, string-preserving number parsing, and `object_pairs_hook=list` in addition to the default decoder path.
+- Mirrored the same mode on the stdlib oracle so these extra option paths expand coverage without creating artificial oracle mismatches.
+
+Reasons:
+- Some decoder branches are unreachable when the harness only calls the default `loads(data)` path.
+- Keeping the option set tiny preserves fuzzer efficiency while still exercising meaningful library-level behavior beyond the CLI wrapper.
+
+Key files changed:
+- `fuzzer/json_atheris_harness.py`
+- `codefix.md`
+
+## 2026-04-20
+
+### JSON harness reaches seeded escape bugs
+Improvements:
+- Raised the JSON Atheris timeout budget so the seeded `PerformanceBug` can raise before libFuzzer aborts the input as a generic timeout.
+- Changed the JSON harness to learn skip patterns only after it has already recorded a real performance reproducer, instead of training itself to miss the bug.
+- Expanded the JSON seed corpus with escape-heavy inputs that drive the mutator into the `\t`/`\b`/`\f` loop and the greedy `\uXXXX` invalidity path.
+
+Reasons:
+- The previous 3 second internal alarm and 5 second outer timeout hid the intended performance bug behind `TIMEOUT` artifacts.
+- The old seeds mostly exercised JSON structure, so the mutator rarely reached the bug-bearing string escape logic.
+
+Key files changed:
+- `fuzzer/json_atheris_harness.py`
+- `main.py`
+- `corpus/json_seeds.txt`
+- `codefix.md`
+
+## 2026-04-21
+
+### Restore graph unique bugs to real-bug count
+Improvements:
+- Changed `plot_data` back to recording real deduplicated bugs in the `unique_bugs` series instead of the broader parser-site signature count.
+- Renamed the progress panel label from `Unique bug sites` back to `Unique bugs` so the chart matches `stats.txt` and `unique_bugs.json`.
+
+Reasons:
+- IPv6 runs produced many parser-message variants from the same parse-error location, which made the graph look like dozens of unique bugs even when only a couple of real bug sites were present.
+
+Key files changed:
+- `evaluation/collect_metrics.py`
+- `evaluation/plot_progress.py`
+- `codefix.md`
+
 ## 2026-04-20
 
 ### Align progress graph bug counts with parser-site dedup
@@ -432,6 +602,23 @@ Improvements:
 - Marked all Frida-mode `CRASH` and `TIMEOUT` results as untrusted for headline crash counting on this machine while still logging them to `bugs.jsonl` for debugging.
 - Added an explicit `frida_crash_untrusted` flag to saved bug entries and a summary note in `stats.txt` so post-run analysis does not accidentally treat those crash counts as authoritative.
 
+## 2026-04-21
+
+### Replace buggy extracted IPv6 parser with strict source override
+Improvements:
+- Added a repo-local `buggy_ipyparse/ipv6_mstv.py` source override that shadows the extracted bytecode and validates IPv6 strings with `ipaddress.IPv6Address`.
+- Fixed the extracted Linux IPv6 path so valid inputs like `::` and `2001:db8::1` parse successfully while malformed forms such as `1::2::3`, `1:::2`, and `::ffff:192.0.2.999` now fail with `ParseException` instead of surfacing custom parser bug exceptions.
+- Updated the persistent worker and directed IPv6 probe so regression checks exercise the fixed source module rather than forcing the stale `.pyc`.
+
+Reasons:
+- The original extracted IPv6 parser bytecode contained seeded functional, invalidity, and reliability bugs that inflated fuzzer findings with parser defects rather than oracle-relevant behavior.
+- The Linux persistent path was still loading the old sourceless module directly, which would have bypassed any repo-local fix.
+
+Key files changed:
+- `linux-ipv6-parser_extracted/PYZ.pyz_extracted/buggy_ipyparse/ipv6_mstv.py`
+- `fuzzer/persistent_worker.py`
+- `evaluation/ipv6_bug_path_probe.py`
+
 Reasons:
 - The current Frida backend is unstable in this environment and can terminate the harness or emit native runtime failures unrelated to target correctness.
 - Treating those events as trusted crash counts was overstating crash-centric results and obscuring which findings actually come from the parser.
@@ -441,6 +628,22 @@ Key files changed:
 - `codefix.md`
 
 ## 2026-04-20
+
+## 2026-04-21
+
+### Keep JSON Atheris invalidities tied to parser sites
+Improvements:
+- Changed the JSON Atheris harness to log traceback-derived exception type, filename, and line number into `results/json/logs/bug_counts.csv`.
+- Switched invalidity dedup from message-only to `(message, filename, lineno)` so distinct parser rejection sites are preserved.
+- Kept artifact dedup by input hash, so repeated bytes still do not flood the crash directory.
+
+Reasons:
+- Message-only invalidity dedup hid parser-owned sites such as `Expecting ':' delimiter` whenever another input had already produced the same text.
+- Matching the direct runner's traceback ownership makes Atheris findings easier to compare against `json_decoder_stv.py` output during triage.
+
+Key files changed:
+- `fuzzer/json_atheris_harness.py`
+- `codefix.md`
 
 ### Switch Frida executor to Frida-managed spawn flow
 Improvements:
@@ -455,3 +658,69 @@ Reasons:
 Key files changed:
 - `fuzzer/executor.py`
 - `codefix.md`
+## 2026-04-21
+
+### Expand cidrize malformed-family coverage
+Improvements:
+- Added explicit CIDRize seed and Tier 2 semantic mutation support for parser-facing malformed families that trigger repeated separator and fallback parsing paths.
+- Seed generation now emits examples for extra hyphens, extra CIDR slashes, repeated glob stars, missing digits before a range hyphen, and IPv4-plus-netmask fallback strings.
+- Added oracle regression checks for these malformed CIDRize inputs so future changes keep them classified as supported invalid inputs.
+
+Reasons:
+- The fuzzer already explored many invalid CIDRize forms, but it was not targeting the exact malformed families needed to hit `InvalidCidrFormatError` and fallback `AddrFormatError` branches in the bundled subject reliably.
+- Making these families first-class seeds and semantic mutations improves reproducibility and reduces dependence on luck during short fuzzing runs.
+
+Key files changed:
+- `fuzzer/seed_generator.py`
+- `fuzzer/mutation/tier2_semantic.py`
+- `evaluation/oracle_checks.py`
+- `corpus/cidrize_seeds.txt`
+- `config/cidrize_format.json`
+
+## 2026-04-21
+
+### Ignore XML namespace declarations in oracle summaries
+Improvements:
+- Excluded `xmlns` namespace declaration attributes from the XML `minidom` structural summary so it matches `ElementTree`'s semantic attribute view.
+- Applied the same normalization in artifact replay classification so saved XML crashes and live harness findings use the same comparison rule.
+
+Reasons:
+- Namespace-qualified XML such as `<ns:root xmlns:ns="urn:test"><ns:item/></ns:root>` was being mislabeled as `oracle_mismatch` only because `minidom` exposes namespace declarations as DOM attributes while `ElementTree` does not.
+- Normalizing away namespace declarations removes this false positive without hiding genuine attribute-structure differences.
+
+Key files changed:
+- `fuzzer/xml_atheris_harness.py`
+- `main.py`
+- `codefix.md`
+
+## 2026-04-21
+
+### Keep traceback findings parser-owned
+Improvements:
+- Changed executor classification so parser-reported bugs and traceback-backed rejections no longer attach structured-oracle verdicts.
+- Left quiet accepted executions on the existing oracle path so non-bug passes still keep oracle metadata for scheduling and analysis.
+- Added regression checks covering parser-reported findings, traceback-backed invalidity, traceback-backed bonus bugs, and quiet-pass oracle attachment.
+
+Reasons:
+- When the parser already explains a failure with its own traceback or explicit bug report, layering oracle metadata on top makes the finding harder to interpret and can blur whether the bug was parser-discovered or oracle-derived.
+- Keeping these findings parser-owned makes IPv6 traceback triage cleaner while preserving the oracle for cases where it still adds value.
+
+Key files changed:
+- `fuzzer/executor.py`
+- `evaluation/oracle_checks.py`
+- `codefix.md`
+## 2026-04-21
+
+### Handle JSON recursion-depth findings without aborting Atheris
+Improvements:
+- Treated `RecursionError` from the JSON target as a classified parser outcome in the Atheris harness instead of letting it escape and terminate the fuzz run.
+- Extended JSON artifact reclassification and coverage replay to tolerate recursion-depth failures during post-processing.
+
+Reasons:
+- Deeply nested JSON arrays were being reported as generic harness crashes even when they represented a real decoder rejection bug.
+- Uncaught `RecursionError` also caused source-coverage replay to be skipped for affected runs.
+
+Key files changed:
+- fuzzer/json_atheris_harness.py
+- main.py
+- evaluation/json_coverage_replay.py

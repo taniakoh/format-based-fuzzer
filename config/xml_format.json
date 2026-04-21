@@ -1,0 +1,43 @@
+{
+  "format": "XML",
+  "instrumentation": "atheris",
+  "atheris_harness": "fuzzer/xml_atheris_harness.py",
+  "fields": ["root", "tag", "attribute", "text", "comment", "cdata", "declaration"],
+  "valid_examples": [
+    "<root/>",
+    "<root></root>",
+    "<root><child/></root>",
+    "<root><child>text</child></root>",
+    "<root attr=\"value\"/>",
+    "<root a=\"1\" b=\"two\"/>",
+    "<root><a/><b/><c/></root>",
+    "<root><!--comment--><child/></root>",
+    "<root><![CDATA[some <unsafe> text]]></root>",
+    "<?xml version=\"1.0\"?><root/>",
+    "<ns:root xmlns:ns=\"urn:test\"><ns:item/></ns:root>"
+  ],
+  "semantic_rules": [
+    "tag_rename",
+    "close_tag_mismatch",
+    "attribute_inject",
+    "attribute_quote_damage",
+    "empty_element_flip",
+    "comment_injection",
+    "cdata_damage",
+    "duplicate_subtree",
+    "delete_subtree",
+    "declaration_damage",
+    "replace_with_valid_example",
+    "whitespace_injection"
+  ],
+  "havoc_operators": {
+    "bit_flip": 0.14,
+    "byte_substitute": 0.16,
+    "arithmetic": 0.10,
+    "splice": 0.12,
+    "delete_range": 0.14,
+    "insert_random": 0.16,
+    "interesting_byte": 0.18
+  },
+  "bootstrap_examples_limit": 12
+}

@@ -9,10 +9,12 @@ Coverage modes
 Two modes are selected automatically at startup:
 
   Frida     Linux binary + Frida available
-            -> native Linux execution with Frida Stalker block coverage.
-               The observed basic-block addresses are hashed into the
-               existing 65536-byte bitmap and fed through AFL-style novelty
-               tracking. Timeout: 30 s.
+            -> native Linux execution with Frida Stalker coverage.
+               When Frida can resolve executed block addresses to source
+               file/line locations, those line hits are hashed into the
+               existing 65536-byte bitmap. If symbolication is unavailable,
+               it falls back to the prior basic-block edge hashing so
+               coverage stays usable. Timeout: 30 s.
 
   Windows   Opaque PyInstaller .exe bundles (win-ipv4/ipv6-parser.exe)
             -> behavior-hash bitmap: each unique (bug_type, exception_msg)
@@ -28,6 +30,7 @@ from __future__ import annotations
 import ast
 import csv
 import hashlib
+import json
 import os
 import re
 import signal
@@ -58,6 +61,11 @@ _LINUX_BINARIES: dict[str, Path] = {
     "ipv6": _HERE / "ipv4ipv6" / "linux-ipv6-parser",
 }
 
+_PERSISTENT_EXTRACTED_ROOTS: dict[str, Path] = {
+    "ipv4": _HERE / "linux-ipv4-parser_extracted",
+    "ipv6": _HERE / "linux-ipv6-parser_extracted",
+}
+
 _WINDOWS_ARGS: dict[str, list[str]] = {}
 _LINUX_ARGS: dict[str, list[str]] = {}
 _INPUT_ARGS: dict[str, str] = {}
@@ -79,6 +87,18 @@ let prevLoc = 0;
 const seenSlots = new Set();
 const followedThreads = new Set();
 let lastThreadIdsKey = null;
+const slotCache = new Map();
+let symbolicatedEvents = 0;
+let fallbackEvents = 0;
+
+function hashString16(value) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash & (BITMAP_SIZE - 1);
+}
 
 function matchesTargetModule(module) {
   if (module.path === targetPath)
@@ -107,6 +127,47 @@ function recordEdge(slot) {
   edgeBuffer.push(slot);
   if (edgeBuffer.length >= batchSize)
     flushEdges();
+}
+
+function fallbackEdgeSlot(addressValue) {
+  // AFL-QEMU edge hash: curLoc = (pc >> 4) ^ (pc >> 8), then XOR with prevLoc.
+  // Use BigInt for 64-bit addresses, keep lower 32 bits to avoid float precision loss.
+  const lower32 = Number(BigInt(addressValue) & BigInt(0xFFFFFFFF));
+  const curLoc = ((lower32 >>> 4) ^ (lower32 >>> 8)) & (BITMAP_SIZE - 1);
+  const slot = (curLoc ^ prevLoc) & (BITMAP_SIZE - 1);
+  prevLoc = (curLoc >>> 1) & (BITMAP_SIZE - 1);
+  fallbackEvents++;
+  return slot;
+}
+
+function lineCoverageSlot(addressValue) {
+  const cacheKey = String(addressValue);
+  const cached = slotCache.get(cacheKey);
+  if (cached !== undefined)
+    return cached;
+
+  let slot = null;
+  try {
+    const symbol = DebugSymbol.fromAddress(ptr(addressValue));
+    const fileName = typeof symbol.fileName === "string" ? symbol.fileName : "";
+    const lineNumber = typeof symbol.lineNumber === "number" ? symbol.lineNumber : 0;
+    if (fileName.length > 0 && lineNumber > 0) {
+      slot = hashString16(fileName + ":" + lineNumber);
+      symbolicatedEvents++;
+    }
+  } catch (e) {
+    send({
+      type: "debug",
+      event: "symbolicate-error",
+      error: String(e)
+    });
+  }
+
+  if (slot === null)
+    slot = fallbackEdgeSlot(addressValue);
+
+  slotCache.set(cacheKey, slot);
+  return slot;
 }
 
 function drainEvents(trigger) {
@@ -243,7 +304,9 @@ rpc.exports.flush = function () {
     trigger: "rpc",
     followedThreads: Array.from(followedThreads.values()),
     bufferedEdges: edgeBuffer.length,
-    uniqueSlots: seenSlots.size
+    uniqueSlots: seenSlots.size,
+    symbolicatedEvents: symbolicatedEvents,
+    fallbackEvents: fallbackEvents
   });
   return true;
 };
@@ -256,7 +319,9 @@ rpc.exports.dispose = function () {
     trigger: "dispose",
     followedThreads: Array.from(followedThreads.values()),
     bufferedEdges: edgeBuffer.length,
-    uniqueSlots: seenSlots.size
+    uniqueSlots: seenSlots.size,
+    symbolicatedEvents: symbolicatedEvents,
+    fallbackEvents: fallbackEvents
   });
   return true;
 };
@@ -323,12 +388,12 @@ def _frida_agent_source(binary_path: Path) -> str:
 
 
 def _edge_slots_to_bitmap(edge_slots: list[int]) -> bytes:
-    """Build a hit-count bitmap from pre-computed AFL-style edge slot numbers."""
-    bitmap = bytearray(BITMAP_SIZE)
-    counts: Counter[int] = Counter(edge_slots)
-    for slot, count in counts.items():
-        bitmap[slot] = min(count, 255)
-    return bytes(bitmap)
+        """Build a hit-count bitmap from pre-computed Frida coverage slot numbers."""
+        bitmap = bytearray(BITMAP_SIZE)
+        counts: Counter[int] = Counter(edge_slots)
+        for slot, count in counts.items():
+            bitmap[slot] = min(count, 255)
+        return bytes(bitmap)
 
 
 _TRACEBACK_BLOCK_RE = re.compile(
@@ -682,6 +747,7 @@ class Executor:
         target: str,
         timeout_seconds: int | None = None,
         coverage_mode: str = "auto",
+        persistent_mode: bool = False,
     ):
         """
         Parameters
@@ -697,9 +763,12 @@ class Executor:
         self.target = target
         self._cwd = _HERE / "results" / target
         self._cwd.mkdir(parents=True, exist_ok=True)
+        self._persistent_requested = bool(persistent_mode)
+        self._persistent_proc: subprocess.Popen[str] | None = None
 
         linux_bin = _LINUX_BINARIES.get(target)
         win_bin = _WINDOWS_BINARIES.get(target)
+        persistent_root = _PERSISTENT_EXTRACTED_ROOTS.get(target)
 
         if linux_bin is None and win_bin is None:
             registered = sorted(set(_WINDOWS_BINARIES) | set(_LINUX_BINARIES))
@@ -721,7 +790,28 @@ class Executor:
                 f"and a Linux host. Binary path: {linux_bin}"
             )
 
-        if use_frida:
+        use_persistent = (
+            self._persistent_requested
+            and _IS_LINUX
+            and persistent_root is not None
+            and persistent_root.exists()
+        )
+
+        if self._persistent_requested and not use_persistent:
+            raise RuntimeError(
+                f"persistent mode requires extracted Linux assets for target '{target}'. "
+                f"Expected {persistent_root}"
+            )
+
+        if use_persistent and coverage_mode == "frida":
+            raise RuntimeError("persistent mode is incompatible with coverage_mode='frida'")
+
+        if use_persistent:
+            self.binary = linux_bin or persistent_root
+            self._fixed_args = list(_LINUX_ARGS.get(target, []))
+            self.timeout = timeout_seconds or TIMEOUT_SECONDS_LINUX
+            self._mode = "Persistent"
+        elif use_frida:
             _load_frida()
             self.binary = linux_bin
             self._fixed_args = list(_LINUX_ARGS.get(target, []))
@@ -758,11 +848,161 @@ class Executor:
 
     def run(self, input_data: bytes) -> tuple[bytes, bool, RunResult]:
         input_str = _cli_safe_input(input_data, self._input_encoding)
+        if self._mode == "Persistent":
+            result = self._run_persistent(input_str)
+            bitmap = _result_to_bitmap(result)
+            return bitmap, result.is_crash, result
         if self._mode == "Frida":
             return self._run_with_frida(input_str)
         result = self._run_binary(input_str)
         bitmap = _result_to_bitmap(result)
         return bitmap, result.is_crash, result
+
+    def close(self) -> None:
+        if self._persistent_proc is None:
+            return
+        proc = self._persistent_proc
+        self._persistent_proc = None
+        try:
+            if proc.stdin is not None:
+                proc.stdin.write(json.dumps({"command": "shutdown"}) + "\n")
+                proc.stdin.flush()
+        except Exception:
+            pass
+        try:
+            proc.wait(timeout=1)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    def _ensure_persistent_worker(self) -> subprocess.Popen[str]:
+        proc = self._persistent_proc
+        if proc is not None and proc.poll() is None:
+            return proc
+
+        worker = _HERE / "fuzzer" / "persistent_worker.py"
+        proc = subprocess.Popen(
+            [sys.executable, str(worker), "--target", self.target],
+            cwd=_HERE,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+        )
+        self._persistent_proc = proc
+        ready_line = proc.stdout.readline() if proc.stdout is not None else ""
+        try:
+            ready = json.loads(ready_line) if ready_line else {}
+        except json.JSONDecodeError as exc:
+            stderr = proc.stderr.read() if proc.stderr is not None else ""
+            self.close()
+            raise RuntimeError(
+                f"persistent worker failed to initialize for target '{self.target}': {exc} {stderr}"
+            ) from exc
+        if ready.get("status") != "ready":
+            stderr = proc.stderr.read() if proc.stderr is not None else ""
+            self.close()
+            raise RuntimeError(
+                f"persistent worker did not become ready for target '{self.target}': "
+                f"{ready!r} {stderr}"
+            )
+        return proc
+
+    def _run_persistent(self, input_str: str) -> RunResult:
+        try:
+            proc = self._ensure_persistent_worker()
+        except Exception as exc:
+            return RunResult(
+                input_str=input_str,
+                bug_type=BugType.CRASH,
+                exit_code=None,
+                stdout="",
+                stderr="",
+                exception_msg=str(exc),
+            )
+
+        if proc.stdin is None or proc.stdout is None:
+            self.close()
+            return RunResult(
+                input_str=input_str,
+                bug_type=BugType.CRASH,
+                exit_code=None,
+                stdout="",
+                stderr="",
+                exception_msg="Persistent worker pipes are unavailable",
+            )
+
+        try:
+            proc.stdin.write(json.dumps({"command": "run", "input": input_str}) + "\n")
+            proc.stdin.flush()
+            line = proc.stdout.readline()
+        except Exception as exc:
+            self.close()
+            return RunResult(
+                input_str=input_str,
+                bug_type=BugType.CRASH,
+                exit_code=None,
+                stdout="",
+                stderr="",
+                exception_msg=f"Persistent worker I/O failed: {exc}",
+            )
+
+        if not line:
+            stderr = proc.stderr.read() if proc.stderr is not None else ""
+            self.close()
+            return RunResult(
+                input_str=input_str,
+                bug_type=BugType.CRASH,
+                exit_code=None,
+                stdout="",
+                stderr=stderr,
+                exception_msg="Persistent worker exited unexpectedly",
+            )
+
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError as exc:
+            stderr = proc.stderr.read() if proc.stderr is not None else ""
+            self.close()
+            return RunResult(
+                input_str=input_str,
+                bug_type=BugType.CRASH,
+                exit_code=None,
+                stdout="",
+                stderr=stderr,
+                exception_msg=f"Persistent worker returned invalid JSON: {exc}",
+            )
+
+        if payload.get("status") != "ok":
+            return RunResult(
+                input_str=input_str,
+                bug_type=BugType.CRASH,
+                exit_code=None,
+                stdout="",
+                stderr="",
+                exception_msg=str(payload.get("error", "Persistent worker returned an error")),
+            )
+
+        result = RunResult(
+            input_str=input_str,
+            bug_type=str(payload.get("bug_type", BugType.PASS)),
+            exit_code=payload.get("exit_code"),
+            stdout=str(payload.get("stdout", "")),
+            stderr=str(payload.get("stderr", "")),
+            exception_msg=str(payload.get("exception_msg", "")),
+            traceback=str(payload.get("traceback", "")),
+        )
+        result.parser_reported_bug_type = payload.get("parser_reported_bug_type")
+        result.parser_reported_message = str(payload.get("parser_reported_message", ""))
+        result.parser_reported_exc_type = str(payload.get("parser_reported_exc_type", ""))
+        result.parser_reported_filename = str(payload.get("parser_reported_filename", ""))
+        result.parser_reported_lineno = payload.get("parser_reported_lineno")
+        return self._apply_oracle(result)
 
     def _run_with_frida(self, input_str: str) -> tuple[bytes, bool, RunResult]:
         frida = _load_frida()
@@ -855,7 +1095,13 @@ class Executor:
                     device.kill(pid)
                 except Exception:
                     pass
-                if not detached_event.wait(5):
+                # Hard SIGKILL if frida's kill didn't unstick the process.
+                if not detached_event.wait(3):
+                    try:
+                        os.kill(pid, signal.SIGKILL)
+                    except Exception:
+                        pass
+                if not detached_event.wait(3):
                     detached_info["reason"] = "timeout"
                 _frida_debug(
                     f"process timeout pid={pid} partial_edges={len(edge_slots)}"
@@ -935,16 +1181,26 @@ class Executor:
             except Exception:
                 pass
             if not detached_event.is_set():
-                if script is not None:
-                    try:
-                        script.unload()
-                    except Exception:
-                        pass
-                if session is not None:
-                    try:
-                        session.detach()
-                    except Exception:
-                        pass
+                # Run Frida cleanup in a daemon thread so a stuck unload/detach
+                # call can't block the fuzzer indefinitely.
+                _script_ref = script
+                _session_ref = session
+
+                def _frida_cleanup() -> None:
+                    if _script_ref is not None:
+                        try:
+                            _script_ref.unload()
+                        except Exception:
+                            pass
+                    if _session_ref is not None:
+                        try:
+                            _session_ref.detach()
+                        except Exception:
+                            pass
+
+                _cleanup_thread = threading.Thread(target=_frida_cleanup, daemon=True)
+                _cleanup_thread.start()
+                _cleanup_thread.join(timeout=4.0)
 
     def _run_binary(self, input_str: str) -> RunResult:
         cmd = [str(self.binary), *self._fixed_args, f"{self._input_arg}={input_str}"]
@@ -1015,10 +1271,14 @@ class Executor:
     def _apply_oracle(self, result: RunResult) -> RunResult:
         verdict = evaluate_target_input(self.target, result.input_str)
         result.oracle = verdict
-
         parser_type = result.parser_reported_bug_type
         if parser_type:
             result.bug_type = str(parser_type)
+            if verdict.supported:
+                if parser_type == BugType.INVALIDITY and verdict.expected_valid is True:
+                    result.bug_type = BugType.VALIDITY
+                elif parser_type == BugType.VALIDITY and verdict.expected_valid is False:
+                    result.bug_type = BugType.INVALIDITY
             result.exception_msg = (
                 result.parser_reported_message
                 or result.exception_msg
@@ -1029,6 +1289,8 @@ class Executor:
         if result.bug_type in (BugType.CRASH, BugType.TIMEOUT):
             return result
 
+        # Once the parser has already emitted a traceback, keep classification
+        # parser-driven instead of layering an oracle verdict onto the result.
         observed_rejection = bool(result.traceback) or result.exit_code == 1
         exc_type = _traceback_exception_type(result.traceback)
         is_parse_rejection = exc_type.endswith("ParseException") or result.exit_code == 1
@@ -1038,7 +1300,10 @@ class Executor:
             return result
 
         if observed_rejection and is_parse_rejection:
-            result.bug_type = BugType.INVALIDITY
+            if verdict.supported and verdict.expected_valid is True:
+                result.bug_type = BugType.VALIDITY
+            else:
+                result.bug_type = BugType.INVALIDITY
             result.exception_msg = result.exception_msg or "Parser rejected input"
             return result
 
@@ -1048,6 +1313,15 @@ class Executor:
                 result.exception_msg
                 or f"Parser raised {exc_type or 'an unexpected exception'}"
             )
+            return result
+
+        if verdict.supported and verdict.expected_valid is False:
+            result.bug_type = BugType.ORACLE_MISMATCH
+            result.exception_msg = "Parser accepted input the oracle expected to be invalid"
+            return result
+
+        if verdict.supported and verdict.expected_valid is True:
+            result.bug_type = BugType.PASS
             return result
 
         result.bug_type = BugType.PASS

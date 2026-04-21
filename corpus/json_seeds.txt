@@ -9,3 +9,27 @@ false
 {"a":[1,2,3],"b":{"nested":true}}
 ["foo", {"bar":["baz", null, 1.0, 2]}]
 {"__complex__": true, "real": 1, "imag": 2}
+"\t"
+"\b"
+"\f"
+"\u0000b"
+"null\u0000byte"
+"\u1234a"
+{"key":"\u0000b"}
+{"key":"\u1234a"}
+["\u0000b"]
+"\u1"
+"\u12345"
+{"hex":"\u12"}
+{"hex":"\u12345"}
+{"key":"\t"}
+{"key":"\b"}
+{"key":"\f"}
+[1 2]
+["a" "b"]
+[true false]
+[null null]
+[1,2 3]
+[,1]
+[,]
+[1,,2]

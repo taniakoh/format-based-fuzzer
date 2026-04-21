@@ -19,6 +19,8 @@ py-afl-fuzz -i corpus -o findings -- \
 from __future__ import annotations
 
 import argparse
+import importlib.machinery
+import importlib.util
 import sys
 import traceback
 from pathlib import Path
@@ -41,6 +43,42 @@ def _configure_import_path(target: str) -> None:
     sys.path.insert(0, str(extracted_dir))
 
 
+def _load_pyc_module(module_name: str, pyc_path: Path):
+    loader = importlib.machinery.SourcelessFileLoader(module_name, str(pyc_path))
+    spec = importlib.util.spec_from_loader(module_name, loader)
+    if spec is None:
+        raise ImportError(f"Could not create spec for {module_name} from {pyc_path}")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def _load_module_with_source_fallback(module_name: str, pyc_path: Path, hidden_sys_path: Path | None = None):
+    try:
+        return _load_pyc_module(module_name, pyc_path)
+    except ImportError as exc:
+        source_path = pyc_path.with_suffix(".py")
+        if not source_path.exists():
+            raise
+        spec = importlib.util.spec_from_file_location(module_name, source_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not create spec for {module_name} from {source_path}") from exc
+        module = importlib.util.module_from_spec(spec)
+        hidden_entry = str(hidden_sys_path.resolve()) if hidden_sys_path is not None else None
+        removed_indexes: list[int] = []
+        if hidden_entry is not None:
+            removed_indexes = [i for i, entry in enumerate(sys.path) if Path(entry or ".").resolve() == Path(hidden_entry)]
+            for i in reversed(removed_indexes):
+                sys.path.pop(i)
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            if hidden_entry is not None:
+                for i in removed_indexes:
+                    sys.path.insert(i, hidden_entry)
+        return module
+
+
 def _load_parser(target: str):
     _configure_import_path(target)
     if target == "ipv4":
@@ -48,9 +86,12 @@ def _load_parser(target: str):
 
         return IPv4
 
-    from buggy_ipyparse.ipv6_mstv import IPv6  # type: ignore
-
-    return IPv6
+    parser_mod = _load_module_with_source_fallback(
+        "buggy_ipyparse.ipv6_mstv",
+        EXTRACTED_DIRS[target] / "buggy_ipyparse" / "ipv6_mstv.pyc",
+        hidden_sys_path=EXTRACTED_DIRS[target],
+    )
+    return parser_mod.IPv6
 
 
 def _read_input(args: argparse.Namespace) -> str:

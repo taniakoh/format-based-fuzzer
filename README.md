@@ -1,6 +1,7 @@
 # Hybrid Coverage-Guided Fuzzer
 
-A format-aware fuzzer targeting IPv4, IPv6, cidrize, cJSON, and a bundled JSON decoder.
+A format-aware fuzzer targeting IPv4, IPv6, cidrize, cJSON, a bundled JSON decoder,
+and an XML target backed by stdlib parsers.
 For binary targets, the executor now supports three runtime modes: Windows
 behavior hashing, Linux behavior hashing, and AFL++ QEMU edge coverage when
 `afl-showmap` is available. The `cjson` target uses the ASan-enabled Linux
@@ -46,6 +47,30 @@ format-based-fuzzer/
 
 ---
 
+## Why Add a New Format?
+
+Adding a new format is mainly about testing whether the fuzzer's design really
+generalizes beyond the formats it already knows.
+
+- It checks the repository's main architectural claim: new targets should be
+  onboarded mostly through config, seeds, and lightweight target-specific
+  semantics, not by rewriting the engine.
+- It broadens evaluation across different input shapes, which makes it easier
+  to tell whether a scheduler or mutation strategy is genuinely format-agnostic
+  or only tuned to one parser family.
+- It helps expose where the current pipeline is too brittle, such as when a new
+  target needs deeper structural mutations, a stronger oracle, or a different
+  seed-generation strategy.
+- It increases the practical value of the project by showing that the same
+  corpus, coverage, and scheduling machinery can transfer to additional real
+  parsers with limited manual work.
+
+In short, a new format is useful when it strengthens the evidence that this is
+an extensible format-aware fuzzing framework rather than a set of one-off
+target integrations.
+
+---
+
 ## Requirements
 
 **Python 3.11+** is the primary supported setup for the binary targets.
@@ -87,9 +112,9 @@ real 65,536-byte AFL++ edge bitmap instead of the fallback behavior hash.
 If `afl-showmap` is not installed, Linux still runs natively, but coverage
 falls back to the same behavior-hash model used on Windows.
 
-### JSON target requirements
+### JSON and XML target requirements
 
-The `json` target uses [Atheris](https://github.com/google/atheris) for instrumentation.
+The `json` and `xml` targets use [Atheris](https://github.com/google/atheris) for instrumentation.
 
 - Official Atheris support is documented for Linux/macOS and Python 3.6-3.11.
 - The harness in this repo exits early with a clear error on unsupported environments such as Windows or Python 3.12+.
@@ -107,13 +132,14 @@ python main.py <target> [options]
 
 | Argument | Values | Description |
 |---|---|---|
-| `target` | `ipv4`, `ipv6`, `cidrize`, `cjson`, `json`, `all` | Which parser to fuzz (`all` runs the binary parser targets sequentially) |
+| `target` | `ipv4`, `ipv6`, `cidrize`, `cjson`, `json`, `xml`, `all` | Which parser to fuzz (`all` runs `ipv4`, `ipv6`, `cidrize`, and `json` in parallel) |
 | `--havoc-iters N` | int (default: `8`) | Byte-level mutations applied per execution |
 | `--time-budget S` | int (default: `86400`) | Total fuzzing time in seconds |
 | `--seed RNG` | int (default: `42`) | RNG seed for reproducibility |
 | `--seeds-n N` | int (default: `100`) | Initial corpus size loaded at startup |
 | `--evaluation-mode MODE` | `auto`, `havoc_only`, `semantic_plus_havoc`, `static_payoff`, `hybrid_dl` | Explicit evaluation configuration |
 | `--coverage MODE` | `auto`, `frida`, `hash` (default: `auto`) | Coverage instrumentation mode: `auto` picks Frida on Linux when a linux binary is present, else falls back to behavior-hash; `frida` forces Frida (Linux + linux binary required); `hash` forces behavior-hash and skips Frida entirely |
+| `--persistent` | flag | For Linux `ipv4`/`ipv6`, reuse a long-lived Python worker backed by the extracted parser bundle to avoid per-input startup cost. This mode uses behavior-hash coverage instead of Frida |
 | `--no-dl` | flag | Compatibility flag that forces a non-DL mode |
 | `--fresh-start` | flag | Clear `results/<target>/` and `models/<target>_surrogate.pt` before the run |
 
@@ -138,7 +164,10 @@ python3 main.py cjson --time-budget 3600
 # Fuzz the bundled JSON decoder with Atheris for 10 minutes
 python main.py json --time-budget 600
 
-# Fuzz the binary parser targets (`ipv4`, `ipv6`, `cidrize`) sequentially
+# Fuzz the XML parser pair with Atheris for 10 minutes
+python main.py xml --time-budget 600
+
+# Fuzz the default multi-target set (`ipv4`, `ipv6`, `cidrize`, `json`) in parallel
 python main.py all --time-budget 86400
 
 # Reproducible run
@@ -166,7 +195,9 @@ python3 main.py ipv6 --time-budget 100 --fresh-start
 
 ```
 
-> On Linux, Frida Stalker provides block-level edge coverage for the binary targets when `frida` is installed. Pass `--coverage hash` to skip Frida entirely and use behavior-hash mode on any platform.
+> On Linux, Frida Stalker now prefers symbolicated source-line hits for the binary targets when `frida` is installed, hashing `(file, line)` locations into the 65,536-slot bitmap. When debug symbols are unavailable it falls back to block-edge hashing. Pass `--coverage hash` to skip Frida entirely and use behavior-hash mode on any platform.
+
+> For throughput-focused Linux runs on the extracted `ipv4` and `ipv6` bundles, pass `--persistent --coverage hash` to keep the parser loaded in a long-lived worker process instead of paying startup cost on every testcase.
 
 > On Windows, the parser bundles are PyInstaller one-file executables. Each
 > execution can take about 20-30 seconds to unpack, so expect much lower exec/s
@@ -176,7 +207,7 @@ python3 main.py ipv6 --time-budget 100 --fresh-start
 > `cjson/cjson_driver_asan`, so AddressSanitizer findings surface as crashes
 > during fuzzing without any extra runtime flag.
 
-> The `json` target is different: it launches an Atheris/libFuzzer campaign in `results/json/` and lets Atheris manage corpus growth and coverage guidance directly.
+> The `json` and `xml` targets are different: they launch Atheris/libFuzzer campaigns in `results/json/` and `results/xml/` and let Atheris manage corpus growth and coverage guidance directly.
 
 ---
 
@@ -300,8 +331,10 @@ independent oracle:
 - `oracle_unknown_reject`: oracle does not support the shape, parser rejected it
 - `CRASH` / `TIMEOUT`: process failure or timeout
 
-Current built-in oracles cover IPv4, IPv6, and cidrize. The JSON target uses a
-separate stdlib-JSON oracle inside the Atheris harness.
+Current built-in oracles cover IPv4, IPv6, cidrize, and XML. The JSON target
+uses a separate stdlib-JSON oracle inside the Atheris harness, while the XML
+target uses `xml.etree.ElementTree` as its reference parser and compares it
+against a stdlib `minidom` target parser inside the Atheris harness.
 
 The binary-target oracle now records a parsed `shape` family and optional
 `normalized` form for accepted inputs. For `cidrize`, the oracle classifies
@@ -330,7 +363,7 @@ All results are written to `results/<target>/`:
 | `dl_summary.json` | Final DL/checkpoint summary for the run, including proxy-target metadata |
 | `stats.txt` | Final summary printed and saved at the end of each run, including corrected first-seen timings |
 
-For the `json` target specifically:
+For the `json` and `xml` targets specifically:
 
 - `atheris.log` stores the Atheris/libFuzzer session output
 - `atheris_corpus/` stores the on-disk corpus used to seed and resume the run

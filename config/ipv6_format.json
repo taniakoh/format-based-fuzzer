@@ -14,7 +14,7 @@
     "::192.0.2.1"
   ],
   "semantic_rules": [
-    "group_boundary", "double_colon_position", "mixed_notation",
+    "group_boundary", "double_colon_position", "compressed_valid_form", "embedded_ipv4_valid_form", "mixed_notation",
     "extra_groups", "missing_groups", "wrong_separator",
     "overflow_group", "leading_zeros", "zone_id",
     "multiple_double_colons", "colon_run", "empty_group"

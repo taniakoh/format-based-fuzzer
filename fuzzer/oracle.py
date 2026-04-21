@@ -14,6 +14,7 @@ import ipaddress
 import json
 import re
 from dataclasses import dataclass
+from xml.etree import ElementTree as ET
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,8 @@ def evaluate_target_input(target: str, input_str: str) -> OracleVerdict:
         return _cidrize_oracle(input_str)
     if target_name in ("json", "json_direct", "cjson"):
         return _json_oracle(input_str)
+    if target_name == "xml":
+        return _xml_oracle(input_str)
     return OracleVerdict(False, None, "no_oracle_for_target", shape="unsupported")
 
 
@@ -151,6 +154,41 @@ def _json_oracle(value: str) -> OracleVerdict:
             supported=False,
             expected_valid=None,
             reason="json_oracle_error",
+            shape="unsupported",
+        )
+
+
+def _xml_oracle(value: str) -> OracleVerdict:
+    lowered = value.lower()
+    if "<!doctype" in lowered or "<!entity" in lowered:
+        return _verdict(
+            supported=False,
+            expected_valid=None,
+            reason="xml_subset_excludes_doctype_and_entity",
+            shape="unsupported",
+        )
+    try:
+        root = ET.fromstring(value)
+        normalized = root.tag if isinstance(root.tag, str) else None
+        return _verdict(
+            supported=True,
+            expected_valid=True,
+            reason="xml_well_formed",
+            shape="xml",
+            normalized=normalized,
+        )
+    except ET.ParseError:
+        return _verdict(
+            supported=True,
+            expected_valid=False,
+            reason="xml_malformed",
+            shape="xml",
+        )
+    except Exception:
+        return _verdict(
+            supported=False,
+            expected_valid=None,
+            reason="xml_oracle_error",
             shape="unsupported",
         )
 

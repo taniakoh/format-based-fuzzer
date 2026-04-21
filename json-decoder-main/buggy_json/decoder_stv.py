@@ -50,6 +50,10 @@ class JSONDecodeError(ValueError):
         return self.__class__, (self.msg, self.doc, self.pos)
 
 
+def _raise_nesting_error(s, pos):
+    raise JSONDecodeError("Maximum nesting depth exceeded", s, pos) from None
+
+
 _CONSTANTS = {
     '-Infinity': NegInf,
     'Infinity': PosInf,
@@ -382,4 +386,6 @@ class JSONDecoder(object):
             obj, end = self.scan_once(s, idx)
         except StopIteration as err:
             raise JSONDecodeError("Expecting value", s, err.value) from None
+        except RecursionError:
+            _raise_nesting_error(s, idx)
         return obj, end

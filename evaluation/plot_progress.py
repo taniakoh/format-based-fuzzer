@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+from collections import Counter
 from pathlib import Path
 
 
@@ -12,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 RESULTS_DIR = ROOT / "results"
 SERIES = (
     ("coverage_percent", "#1d4ed8", "Coverage"),
-    ("unique_bugs", "#b91c1c", "Unique bug sites"),
+    ("unique_bugs", "#b91c1c", "Unique bugs"),
     ("corpus_size", "#047857", "Corpus size"),
     ("unique_crashes", "#7c3aed", "Unique crashes"),
 )
@@ -44,12 +45,30 @@ def parse_args() -> argparse.Namespace:
 
 def resolve_paths(target_or_plot_data: str, output: str | None) -> tuple[Path, Path]:
     target_path = Path(target_or_plot_data)
+    results_candidate = RESULTS_DIR / target_or_plot_data
+
+    def _looks_like_run_dir(path: Path) -> bool:
+        return any(
+            (path / name).exists()
+            for name in ("plot_data", "unique_bugs.json", "oracle_log.csv", "bugs.jsonl")
+        )
+
     if target_path.exists():
-        plot_path = target_path
-        default_output = plot_path.with_suffix(".svg")
+        if target_path.is_file():
+            plot_path = target_path
+            default_output = plot_path.with_suffix(".svg")
+        elif _looks_like_run_dir(target_path):
+            plot_path = target_path / "plot_data"
+            default_output = target_path / "progress.svg"
+        elif results_candidate.exists():
+            plot_path = results_candidate / "plot_data"
+            default_output = results_candidate / "progress.svg"
+        else:
+            plot_path = target_path
+            default_output = plot_path.with_suffix(".svg")
     else:
-        plot_path = RESULTS_DIR / target_or_plot_data / "plot_data"
-        default_output = RESULTS_DIR / target_or_plot_data / "progress.svg"
+        plot_path = results_candidate / "plot_data"
+        default_output = results_candidate / "progress.svg"
 
     if not plot_path.exists():
         raise FileNotFoundError(f"Could not find plot data at {plot_path}")
@@ -101,6 +120,44 @@ def add_atheris_coverage_percent(rows: list[dict[str, float]]) -> list[dict[str,
     for row in rows:
         coverage = float(row.get("coverage_seen", 0.0))
         row["coverage_percent"] = (coverage / final_cov) * 100.0
+    return rows
+
+
+def load_atheris_replay_coverage(results_dir: Path) -> dict | None:
+    """Load saved coverage.py replay totals for an Atheris run if present."""
+    coverage_path = results_dir / "coverage_replay.json"
+    if not coverage_path.exists():
+        return None
+    return json.loads(coverage_path.read_text(encoding="utf-8"))
+
+
+def apply_atheris_replay_coverage(
+    rows: list[dict[str, float]],
+    coverage_payload: dict | None,
+) -> list[dict[str, float]]:
+    """Replace relative Atheris coverage with replayed source coverage when available."""
+    if not rows or not coverage_payload:
+        return add_atheris_coverage_percent(rows)
+
+    checkpoints = sorted(
+        (
+            int(entry.get("corpus_size", 0)),
+            float(entry.get("percent_covered", 0.0)),
+        )
+        for entry in coverage_payload.get("rows", [])
+        if int(entry.get("corpus_size", 0)) > 0
+    )
+    if not checkpoints:
+        return add_atheris_coverage_percent(rows)
+
+    checkpoint_idx = 0
+    current_percent = checkpoints[0][1]
+    for row in rows:
+        corpus_size = int(row.get("corpus_size", 0))
+        while checkpoint_idx + 1 < len(checkpoints) and checkpoints[checkpoint_idx + 1][0] <= corpus_size:
+            checkpoint_idx += 1
+            current_percent = checkpoints[checkpoint_idx][1]
+        row["coverage_percent"] = current_percent
     return rows
 
 
@@ -157,6 +214,7 @@ def load_atheris_rows(results_dir: Path) -> list[dict[str, float]]:
                 "total_execs": float(execs),
                 "coverage_seen": float(cov),
                 "corpus_size": float(corp),
+                "interesting_test_cases": float(corp),
                 "unique_bugs": float(unique_bugs),
                 "unique_crashes": float(unique_crashes),
                 "validity_bugs": 0.0,
@@ -165,7 +223,7 @@ def load_atheris_rows(results_dir: Path) -> list[dict[str, float]]:
                 "execs_per_sec": float(exec_s),
             })
 
-    return add_atheris_coverage_percent(rows)
+    return apply_atheris_replay_coverage(rows, load_atheris_replay_coverage(results_dir))
 
 
 def load_dl_rows(results_dir: Path) -> list[dict[str, float]]:
@@ -185,6 +243,163 @@ def load_dl_rows(results_dir: Path) -> list[dict[str, float]]:
                     "misprediction_rate": float(entry.get("misprediction_rate", 0)),
                 })
     return rows
+
+
+def load_oracle_exec_times(results_dir: Path) -> list[float]:
+    oracle_path = results_dir / "oracle_log.csv"
+    if not oracle_path.exists():
+        return []
+
+    times: list[float] = []
+    with oracle_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            value = row.get("relative_time_sec")
+            if value:
+                times.append(float(value))
+    return times
+
+
+def load_unique_bug_entries(results_dir: Path) -> list[dict[str, object]]:
+    unique_path = results_dir / "unique_bugs.json"
+    if not unique_path.exists():
+        return []
+    payload = json.loads(unique_path.read_text(encoding="utf-8"))
+    entries = payload.get("entries", [])
+    return entries if isinstance(entries, list) else []
+
+
+def interpolate_time_from_plot(exec_no: int, rows: list[dict[str, float]]) -> float | None:
+    if exec_no <= 0 or not rows:
+        return None
+
+    previous = rows[0]
+    prev_exec = int(previous.get("total_execs", 0.0))
+    prev_time = float(previous.get("relative_time_sec", 0.0))
+    if exec_no <= prev_exec:
+        return prev_time
+
+    for row in rows[1:]:
+        curr_exec = int(row.get("total_execs", 0.0))
+        curr_time = float(row.get("relative_time_sec", 0.0))
+        if exec_no <= curr_exec:
+            if curr_exec == prev_exec:
+                return curr_time
+            ratio = (exec_no - prev_exec) / float(curr_exec - prev_exec)
+            return prev_time + ratio * (curr_time - prev_time)
+        previous = row
+        prev_exec = curr_exec
+        prev_time = curr_time
+
+    return float(rows[-1].get("relative_time_sec", 0.0))
+
+
+def infer_time_for_exec(exec_no: int, oracle_times: list[float], rows: list[dict[str, float]]) -> float | None:
+    if 1 <= exec_no <= len(oracle_times):
+        return oracle_times[exec_no - 1]
+    return interpolate_time_from_plot(exec_no, rows)
+
+
+def build_bug_curve(results_dir: Path, rows: list[dict[str, float]]) -> tuple[list[dict[str, float]], dict[str, object]] | None:
+    entries = load_unique_bug_entries(results_dir)
+    if entries:
+        oracle_times = load_oracle_exec_times(results_dir)
+        bug_points: list[dict[str, float]] = []
+        bug_type_counts: Counter[str] = Counter()
+
+        for entry in sorted(entries, key=lambda item: int(item.get("first_seen_exec", 0) or 0)):
+            exec_no = int(entry.get("first_seen_exec", 0) or 0)
+            if exec_no <= 0:
+                continue
+            timestamp = infer_time_for_exec(exec_no, oracle_times, rows)
+            if timestamp is None:
+                continue
+            bug_type = str(entry.get("bug_type", "unknown"))
+            bug_type_counts[bug_type] += 1
+            bug_points.append(
+                {
+                    "relative_time_sec": float(timestamp),
+                    "unique_bugs": float(len(bug_points) + 1),
+                    "first_seen_exec": float(exec_no),
+                }
+            )
+
+        if bug_points:
+            final_time = max(
+                bug_points[-1]["relative_time_sec"],
+                float(rows[-1].get("relative_time_sec", 0.0)) if rows else 0.0,
+                oracle_times[-1] if oracle_times else 0.0,
+            )
+            curve = [{"relative_time_sec": 0.0, "unique_bugs": 0.0, "first_seen_exec": 0.0}]
+            curve.extend(bug_points)
+            if final_time > curve[-1]["relative_time_sec"]:
+                curve.append(
+                    {
+                        "relative_time_sec": float(final_time),
+                        "unique_bugs": float(curve[-1]["unique_bugs"]),
+                        "first_seen_exec": float(curve[-1]["first_seen_exec"]),
+                    }
+                )
+            return curve, {
+                "source": "unique_bugs.json + oracle_log.csv",
+                "bug_type_counts": dict(sorted(bug_type_counts.items())),
+            }
+
+    if rows and any("unique_bugs" in row for row in rows):
+        curve = [
+            {
+                "relative_time_sec": float(row.get("relative_time_sec", 0.0)),
+                "unique_bugs": float(row.get("unique_bugs", 0.0)),
+                "first_seen_exec": float(row.get("total_execs", 0.0)),
+            }
+            for row in rows
+        ]
+        if curve and (curve[0]["relative_time_sec"] > 0.0 or curve[0]["unique_bugs"] > 0.0):
+            curve.insert(0, {"relative_time_sec": 0.0, "unique_bugs": 0.0, "first_seen_exec": 0.0})
+        return curve, {"source": "plot_data", "bug_type_counts": {}}
+
+    return None
+
+
+def apply_bug_curve_to_rows(results_dir: Path, rows: list[dict[str, float]]) -> tuple[list[dict[str, float]], dict[str, object] | None]:
+    payload = build_bug_curve(results_dir, rows)
+    if payload is None:
+        return rows, None
+
+    bug_curve, metadata = payload
+    curve_idx = 0
+    current_unique_bugs = 0.0
+
+    if rows:
+        enriched_rows = [dict(row) for row in rows]
+        for row in enriched_rows:
+            current_time = float(row.get("relative_time_sec", 0.0))
+            while curve_idx + 1 < len(bug_curve) and float(bug_curve[curve_idx + 1]["relative_time_sec"]) <= current_time:
+                curve_idx += 1
+                current_unique_bugs = float(bug_curve[curve_idx]["unique_bugs"])
+            row["unique_bugs"] = current_unique_bugs
+        return enriched_rows, metadata
+
+    synthetic_rows: list[dict[str, float]] = []
+    for point in bug_curve:
+        t = float(point["relative_time_sec"])
+        synthetic_rows.append(
+            {
+                "relative_time_sec": t,
+                "total_execs": float(point.get("first_seen_exec", 0.0)),
+                "coverage_seen": 0.0,
+                "coverage_percent": 0.0,
+                "interesting_test_cases": 0.0,
+                "corpus_size": 0.0,
+                "unique_bugs": float(point["unique_bugs"]),
+                "unique_crashes": 0.0,
+                "validity_bugs": 0.0,
+                "functional_bugs": 0.0,
+                "bonus_bugs": 0.0,
+                "execs_per_sec": (float(point.get("first_seen_exec", 0.0)) / t) if t > 0 else 0.0,
+            }
+        )
+    return synthetic_rows, metadata
 
 
 def svg_polyline(points: list[tuple[float, float]]) -> str:
@@ -321,6 +536,7 @@ def render_svg(
     dl_rows: list[dict[str, float]] | None = None,
     coverage_label: str = "Coverage",
     coverage_note: str | None = None,
+    bug_note: str | None = None,
 ) -> str:
     if not rows:
         return render_empty_svg(title)
@@ -353,7 +569,12 @@ def render_svg(
         x0 = panel_left + col_idx * (panel_width + panel_gap_x)
         y0 = panel_top + row_idx * (panel_height + panel_gap_y)
         panel_label = coverage_label if key == "coverage_percent" else label
-        panel_note = coverage_note if key == "coverage_percent" else None
+        if key == "coverage_percent":
+            panel_note = coverage_note
+        elif key == "unique_bugs":
+            panel_note = bug_note
+        else:
+            panel_note = None
         panels.append(
             render_panel(
                 rows,
@@ -556,9 +777,18 @@ def main() -> None:
         rows = load_atheris_rows(results_dir)
         output_path = Path(args.output) if args.output else results_dir / "progress.svg"
         title = f"Fuzzer Progress (Atheris): {results_dir.name}"
-        coverage_label = "Coverage (% of final observed cov)"
-        final_cov = int(rows[-1]["coverage_seen"]) if rows else 0
-        coverage_note = f"Final: 100.0% ({final_cov} cov)"
+        replay_payload = load_atheris_replay_coverage(results_dir)
+        replay_final = replay_payload.get("final", {}) if replay_payload else {}
+        if replay_final:
+            coverage_label = "Coverage (% of buggy_json source)"
+            final_pct = float(replay_final.get("percent_covered", 0.0))
+            covered_items = int(replay_final.get("covered_items", 0))
+            total_items = int(replay_final.get("total_items", 0))
+            coverage_note = f"Final: {final_pct:.2f}% ({covered_items}/{total_items} lines+branches)"
+        else:
+            coverage_label = "Coverage (% of final observed cov)"
+            final_cov = int(rows[-1]["coverage_seen"]) if rows else 0
+            coverage_note = f"Final: 100.0% ({final_cov} cov)"
     else:
         plot_path, output_path = resolve_paths(args.target_or_plot_data, args.output)
         rows = load_rows(plot_path)
@@ -569,6 +799,11 @@ def main() -> None:
         final_pct = rows[-1]["coverage_percent"] if rows else 0.0
         coverage_note = f"Final: {final_pct:.3f}% ({int(final_cov)} slots)"
 
+    rows, bug_curve_metadata = apply_bug_curve_to_rows(results_dir, rows)
+    bug_note = None
+    if bug_curve_metadata is not None:
+        bug_note = f"Source: {bug_curve_metadata['source']}"
+
     dl_rows = load_dl_rows(results_dir)
     svg = render_svg(
         rows,
@@ -576,6 +811,7 @@ def main() -> None:
         dl_rows=dl_rows or None,
         coverage_label=coverage_label,
         coverage_note=coverage_note,
+        bug_note=bug_note,
     )
     output_path.write_text(svg, encoding="utf-8")
     print(f"Wrote {output_path}")

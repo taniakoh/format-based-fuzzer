@@ -13,9 +13,40 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 CONFIG_DIR = PROJECT_ROOT / "config"
 CORPUS_DIR = PROJECT_ROOT / "corpus"
 
-DEFAULT_BOOTSTRAP_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
+_BOOTSTRAP_ENV_KEYS = ("OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENAI_MODEL")
 
 _PRINTABLE_ASCII = set(range(32, 127)) | {9, 10, 13}
+
+
+def _strip_optional_quotes(value: str) -> str:
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def _load_project_dotenv(*, project_root: Path | None = None) -> None:
+    """Populate missing OpenAI bootstrap env vars from the project .env file."""
+    root = project_root or PROJECT_ROOT
+    env_path = root / ".env"
+    if not env_path.exists():
+        return
+
+    try:
+        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if key not in _BOOTSTRAP_ENV_KEYS or os.environ.get(key):
+                continue
+            os.environ[key] = _strip_optional_quotes(value.strip())
+    except OSError as exc:
+        print(f"[bootstrap] Failed to read {env_path}: {exc}")
+
+
+_load_project_dotenv()
+DEFAULT_BOOTSTRAP_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
 
 
 def _bootstrap_path(
@@ -357,7 +388,7 @@ def _bootstrap_prompt(target: str, fmt_config: dict, examples_limit: int) -> str
         f"- target format name: {target}\n"
         f"- inferred format kind: {format_kind}\n"
         f"- maximum total examples: {examples_limit}\n"
-        "- keep examples tiny and cost-effective\n"
+        "- keep examples as small and cost-effective as possible while preserving the minimal structure needed to parse\n"
         "- include a mix of valid and slightly malformed examples\n"
         "- if the format is binary or container-like, use seed_encoding=base64 and base64-encode each seed\n"
         "- token_hints must stay lightweight and may include magic_bytes, delimiters, section_markers, length_fields, field_like_regions\n"

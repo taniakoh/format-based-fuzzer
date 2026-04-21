@@ -857,6 +857,10 @@ class JSONSemanticMutator(SemanticMutator):
         "literal_swap",
         "container_wrap",
         "replace_with_valid_example",
+        "escape_injection",
+        "unicode_escape_damage",
+        "nesting_wrap",
+        "number_stress",
         "quote_damage",
         "comma_damage",
         "colon_damage",
@@ -869,6 +873,8 @@ class JSONSemanticMutator(SemanticMutator):
         "literal_swap",
         "container_wrap",
         "replace_with_valid_example",
+        "escape_injection",
+        "nesting_wrap",
         "whitespace_injection",
     ]
 
@@ -969,6 +975,74 @@ class JSONSemanticMutator(SemanticMutator):
             '[0,1,2]',
         ])
         return example.encode(), "root"
+
+    def _escape_injection(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        spans = self._spans_by_name(data, "string")
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+        injection = random.choice([r"\t", r"\b", r"\f", r"\u0000"])
+        if chosen is None:
+            return f'"{injection}"'.encode(), "string"
+
+        token = s[chosen.start : chosen.end]
+        if len(token) < 2:
+            return f'"{injection}"'.encode(), "string"
+        insert_at = random.randint(1, len(token) - 1)
+        mutated = token[:insert_at] + injection + token[insert_at:]
+        return (s[: chosen.start] + mutated + s[chosen.end :]).encode(), "string"
+
+    def _unicode_escape_damage(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        spans = self._spans_by_name(data, "string")
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+        malformed = random.choice([r"\u1", r"\u12", r"\u123", r"\u12345", r"\uABCDE"])
+        if chosen is None:
+            return f'"{malformed}"'.encode(), "string"
+
+        token = s[chosen.start : chosen.end]
+        match = re.search(r"\\u[0-9A-Fa-f]{4}", token)
+        if match is not None:
+            mutated = token[: match.start()] + malformed + token[match.end() :]
+        else:
+            insert_at = random.randint(1, len(token) - 1) if len(token) > 1 else len(token)
+            mutated = token[:insert_at] + malformed + token[insert_at:]
+        return (s[: chosen.start] + mutated + s[chosen.end :]).encode(), "string"
+
+    def _nesting_wrap(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:  # noqa: ARG002
+        s = self._decode(data).strip() or "0"
+        depth = random.choice([8, 16, 32, 64, 128, 256, 512, 1200])
+        if random.random() < 0.5:
+            return ("[" * depth + s + "]" * depth).encode(), "root"
+        return ('{"a":' * depth + s + "}" * depth).encode(), "root"
+
+    def _number_stress(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        spans = self._spans_by_name(data, "literal")
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+        huge = "9" * random.choice([4301, 5000, 7000])
+        if chosen is None:
+            return huge.encode(), "literal"
+        return (s[: chosen.start] + huge + s[chosen.end :]).encode(), "literal"
 
     def _quote_damage(
         self,
@@ -1081,6 +1155,287 @@ class JSONSemanticMutator(SemanticMutator):
         spans = self.get_semantic_spans(data)
         pos = self._guided_insert_position(s, hot_bytes, preferred_fields, spans)
         ws = random.choice([" ", "\t", "\n", "\r"])
+        return (s[:pos] + ws + s[pos:]).encode(), self._field_for_position(
+            spans, pos, default="root"
+        )
+
+
+@SemanticMutator.register("xml")
+class XMLSemanticMutator(SemanticMutator):
+    OPERATIONS = [
+        "tag_rename",
+        "close_tag_mismatch",
+        "attribute_inject",
+        "attribute_quote_damage",
+        "empty_element_flip",
+        "comment_injection",
+        "cdata_damage",
+        "duplicate_subtree",
+        "delete_subtree",
+        "declaration_damage",
+        "replace_with_valid_example",
+        "whitespace_injection",
+    ]
+    VALID_FOCUSED_OPS = [
+        "tag_rename",
+        "attribute_inject",
+        "empty_element_flip",
+        "replace_with_valid_example",
+        "whitespace_injection",
+    ]
+
+    _TAG_NAME_RE = re.compile(r"</?([A-Za-z_][\w:.-]*)")
+    _OPEN_TAG_RE = re.compile(r"<([A-Za-z_][\w:.-]*)(\s[^<>]*?)?>")
+    _EMPTY_TAG_RE = re.compile(r"<([A-Za-z_][\w:.-]*)(\s[^<>]*?)?/>")
+    _PAIR_RE = re.compile(r"<([A-Za-z_][\w:.-]*)(\s[^<>]*?)?>(.*?)</\1>", re.DOTALL)
+    _ATTR_RE = re.compile(r"([A-Za-z_][\w:.-]*)\s*=\s*(\"[^\"]*\"|'[^']*')")
+    _COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+    _CDATA_RE = re.compile(r"<!\[CDATA\[.*?\]\]>", re.DOTALL)
+    _DECL_RE = re.compile(r"<\?xml[^?]*\?>")
+    _CLOSE_TAG_RE = re.compile(r"</([A-Za-z_][\w:.-]*)\s*>")
+
+    def get_semantic_spans(self, data: bytes) -> list[SemanticSpan]:
+        s = self._decode(data)
+        spans = [SemanticSpan("root", 0, len(s))]
+        for match in self._TAG_NAME_RE.finditer(s):
+            spans.append(SemanticSpan("tag", match.start(1), match.end(1)))
+        for match in self._ATTR_RE.finditer(s):
+            spans.append(SemanticSpan("attribute", match.start(), match.end()))
+        for match in self._COMMENT_RE.finditer(s):
+            spans.append(SemanticSpan("comment", match.start(), match.end()))
+        for match in self._CDATA_RE.finditer(s):
+            spans.append(SemanticSpan("cdata", match.start(), match.end()))
+        for match in self._DECL_RE.finditer(s):
+            spans.append(SemanticSpan("declaration", match.start(), match.end()))
+        return spans
+
+    def mutate(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> bytes:
+        op = self._oracle_guided_operation(
+            "xml",
+            data,
+            preferred_ops=self.VALID_FOCUSED_OPS,
+        )
+        try:
+            mutated, field = getattr(self, f"_{op}")(
+                data,
+                hot_bytes=hot_bytes,
+                preferred_fields=preferred_fields,
+            )
+            self._record_trace(
+                operation=op,
+                field=field,
+                hot_bytes=hot_bytes,
+                preferred_fields=preferred_fields,
+            )
+            return mutated
+        except Exception:
+            self._last_trace = {"applied": False}
+            return data
+
+    def _spans_by_name(self, data: bytes, *names: str) -> list[SemanticSpan]:
+        allowed = set(names)
+        return [span for span in self.get_semantic_spans(data) if span.name in allowed]
+
+    def _replace_tag_occurrence(self, text: str, span: SemanticSpan, replacement: str) -> str:
+        original = text[span.start:span.end]
+        return text[:span.start] + replacement + text[span.end:].replace(original, replacement, 1)
+
+    def _tag_rename(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        spans = self._spans_by_name(data, "tag")
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+        replacement = random.choice(["root", "item", "entry", "node", "data"])
+        if chosen is None:
+            return f"<{replacement}/>".encode(), "tag"
+        original = s[chosen.start:chosen.end]
+        updated = s.replace(original, replacement, 1)
+        close_marker = f"</{original}>"
+        if close_marker in updated:
+            updated = updated.replace(close_marker, f"</{replacement}>", 1)
+        return updated.encode(), "tag"
+
+    def _close_tag_mismatch(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        matches = list(self._CLOSE_TAG_RE.finditer(s))
+        if not matches:
+            return (s + "</broken>").encode(), "tag"
+        spans = [SemanticSpan("tag", match.start(1), match.end(1)) for match in matches]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields) or random.choice(spans)
+        replacement = random.choice(["broken", "mismatch", "other"])
+        return (s[:chosen.start] + replacement + s[chosen.end:]).encode(), "tag"
+
+    def _attribute_inject(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        matches = [
+            match for match in self._OPEN_TAG_RE.finditer(s)
+            if not s[match.start():].startswith("<?") and not s[match.start():].startswith("</")
+        ]
+        if not matches:
+            return b"<root attr=\"1\"/>", "attribute"
+        spans = [SemanticSpan("tag", match.start(), match.end()) for match in matches]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields)
+        match = matches[spans.index(chosen)] if chosen is not None else random.choice(matches)
+        insert_at = match.end() - 1
+        attr = random.choice([" id=\"1\"", " enabled=\"true\"", " class=\"sample\"", " ns:flag=\"x\""])
+        if s[insert_at - 1] == "/":
+            insert_at -= 1
+        return (s[:insert_at] + attr + s[insert_at:]).encode(), "attribute"
+
+    def _attribute_quote_damage(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        matches = list(self._ATTR_RE.finditer(s))
+        if not matches:
+            return b"<root attr=value/>", "attribute"
+        spans = [SemanticSpan("attribute", match.start(2), match.end(2)) for match in matches]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields) or random.choice(spans)
+        token = s[chosen.start:chosen.end]
+        damaged = token[1:] if random.random() < 0.5 else token[:-1]
+        return (s[:chosen.start] + damaged + s[chosen.end:]).encode(), "attribute"
+
+    def _empty_element_flip(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        empty_matches = list(self._EMPTY_TAG_RE.finditer(s))
+        if empty_matches:
+            spans = [SemanticSpan("tag", match.start(), match.end()) for match in empty_matches]
+            chosen = self._guided_span(spans, hot_bytes, preferred_fields) or random.choice(spans)
+            match = empty_matches[spans.index(chosen)]
+            replacement = f"<{match.group(1)}{match.group(2) or ''}></{match.group(1)}>"
+            return (s[:match.start()] + replacement + s[match.end():]).encode(), "tag"
+        pair_matches = [match for match in self._PAIR_RE.finditer(s) if not match.group(3).strip()]
+        if not pair_matches:
+            return b"<root></root>", "tag"
+        match = random.choice(pair_matches)
+        replacement = f"<{match.group(1)}{match.group(2) or ''}/>"
+        return (s[:match.start()] + replacement + s[match.end():]).encode(), "tag"
+
+    def _comment_injection(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        spans = self.get_semantic_spans(data)
+        pos = self._guided_insert_position(s, hot_bytes, preferred_fields, spans)
+        comment = random.choice(["<!--comment-->", "<!--x-->", "<!--mutated-->"])
+        return (s[:pos] + comment + s[pos:]).encode(), "comment"
+
+    def _cdata_damage(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        matches = list(self._CDATA_RE.finditer(s))
+        if not matches:
+            return b"<root><![CDATA[text]]></root>", "cdata"
+        spans = [SemanticSpan("cdata", match.start(), match.end()) for match in matches]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields) or random.choice(spans)
+        token = s[chosen.start:chosen.end]
+        damaged = token.replace("]]>", "]>", 1) if "]]>" in token else token + "]"
+        return (s[:chosen.start] + damaged + s[chosen.end:]).encode(), "cdata"
+
+    def _duplicate_subtree(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        matches = list(self._PAIR_RE.finditer(s))
+        if not matches:
+            return b"<root><item/></root>", "root"
+        spans = [SemanticSpan("tag", match.start(), match.end()) for match in matches]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields) or random.choice(spans)
+        match = matches[spans.index(chosen)]
+        fragment = s[match.start():match.end()]
+        return (s[:match.end()] + fragment + s[match.end():]).encode(), "tag"
+
+    def _delete_subtree(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        matches = list(self._PAIR_RE.finditer(s))
+        if not matches:
+            return data, "root"
+        spans = [SemanticSpan("tag", match.start(), match.end()) for match in matches]
+        chosen = self._guided_span(spans, hot_bytes, preferred_fields) or random.choice(spans)
+        match = matches[spans.index(chosen)]
+        return (s[:match.start()] + s[match.end():]).encode(), "tag"
+
+    def _declaration_damage(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        match = self._DECL_RE.search(s)
+        if match is None:
+            return ('<?xml version="1.0"?>' + s).encode(), "declaration"
+        token = match.group(0)
+        damaged = token.replace("?>", ">", 1) if random.random() < 0.5 else token.replace('"1.0"', '1.0', 1)
+        return (s[:match.start()] + damaged + s[match.end():]).encode(), "declaration"
+
+    def _replace_with_valid_example(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:  # noqa: ARG002
+        example = random.choice([
+            "<root/>",
+            "<root><child/></root>",
+            "<root attr=\"value\"/>",
+            "<?xml version=\"1.0\"?><root/>",
+            "<ns:root xmlns:ns=\"urn:test\"><ns:item/></ns:root>",
+        ])
+        return example.encode(), "root"
+
+    def _whitespace_injection(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        spans = self.get_semantic_spans(data)
+        pos = self._guided_insert_position(s, hot_bytes, preferred_fields, spans)
+        ws = random.choice([" ", "\t", "\n"])
         return (s[:pos] + ws + s[pos:]).encode(), self._field_for_position(
             spans, pos, default="root"
         )
@@ -1360,9 +1715,15 @@ class IPv6SemanticMutator(SemanticMutator):
         "group_boundary",
         "replace_with_valid_example",
         "double_colon_position",
+        "compressed_valid_form",
+        "embedded_ipv4_valid_form",
+        "embedded_ipv4_boundary",
         "triple_colon",
+        "triple_colon_full_width",
         "compressed_overflow",
+        "dangling_compression_tail",
         "mixed_notation",
+        "invalid_mixed_suffix",
         "extra_groups",
         "missing_groups",
         "wrong_separator",
@@ -1380,8 +1741,14 @@ class IPv6SemanticMutator(SemanticMutator):
         "mixed_notation",
         "replace_with_valid_example",
         "double_colon_position",
+        "compressed_valid_form",
+        "embedded_ipv4_valid_form",
+        "embedded_ipv4_boundary",
         "triple_colon",
+        "triple_colon_full_width",
         "compressed_overflow",
+        "dangling_compression_tail",
+        "invalid_mixed_suffix",
         "overflow_group",
         "multiple_double_colons",
         "colon_run",
@@ -1450,6 +1817,92 @@ class IPv6SemanticMutator(SemanticMutator):
         ])
         return example.encode(), "group1"
 
+    def _compressed_valid_form(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:  # noqa: ARG002
+        s = self._decode(data)
+        parts = [part for part in s.replace(".", ":").split(":") if part]
+        hex_parts = [part for part in parts if re.fullmatch(r"[0-9A-Fa-f]{1,4}", part)]
+        if not hex_parts:
+            hex_parts = ["1", "2", "3", "4", "5", "6", "7", "8"]
+        left_count = random.randint(0, min(4, len(hex_parts)))
+        right_max = min(3, max(0, len(hex_parts) - left_count))
+        right_count = random.randint(0, right_max)
+        left = hex_parts[:left_count]
+        right = hex_parts[-right_count:] if right_count else []
+        if not left and not right:
+            mutated = "::"
+        elif not left:
+            mutated = "::" + ":".join(right)
+        elif not right:
+            mutated = ":".join(left) + "::"
+        else:
+            mutated = ":".join(left) + "::" + ":".join(right)
+        return mutated.encode(), "double_colon"
+
+    def _embedded_ipv4_valid_form(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        spans = self.get_semantic_spans(data)
+        ipv4 = ".".join(str(random.choice([0, 1, 13, 33, 68, 129, 144, 168, 192, 255])) for _ in range(4))
+        hextets = [part for part in s.split(":") if re.fullmatch(r"[0-9A-Fa-f]{1,4}", part)]
+        choices = [
+            f"::{ipv4}",
+            f"::ffff:{ipv4}",
+            f"{':'.join(hextets[:1])}::ffff:{ipv4}" if hextets else f"1::ffff:{ipv4}",
+            f"{':'.join((hextets + ['1', '2', '3', '4', '5', '6'])[:6])}:{ipv4}",
+            f"{':'.join((hextets + ['1', '2', '3', '4', '5'])[:5])}::{ipv4}",
+            f"{':'.join((hextets + ['1', '2', '3', '4'])[:4])}::{ipv4}",
+            f"{':'.join((hextets + ['1', '2'])[:2])}::{ipv4}",
+            f"{':'.join((hextets + ['1'])[:1])}::{ipv4}",
+        ]
+        mutated = random.choice([choice for choice in choices if choice and "::: " not in choice]).replace(":::","::")
+        pos = max(mutated.rfind(":"), 0)
+        return mutated.encode(), self._field_for_position(spans, pos, default="group6")
+
+    def _embedded_ipv4_boundary(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        """Replace or add embedded IPv4 suffix with boundary/buggy values.
+
+        Targets the IPv4_in_IPv6 grammar component specifically with values
+        known to trigger bugs in the IPv4 parser (e.g. 255.255.255.255).
+        """
+        s = self._decode(data)
+        spans = self.get_semantic_spans(data)
+        boundary_ipv4 = random.choice([
+            "255.255.255.255",
+            "0.0.0.0",
+            "127.0.0.1",
+            "128.0.0.0",
+            "254.254.254.254",
+            "255.0.0.0",
+            "255.255.255.0",
+            "0.255.255.255",
+        ])
+        hextets = [part for part in s.split(":") if re.fullmatch(r"[0-9A-Fa-f]{1,4}", part)]
+        choices = [
+            f"::{boundary_ipv4}",
+            f"::ffff:{boundary_ipv4}",
+            f"0:0:0:0:0:0:{boundary_ipv4}",
+            f"0:0:0:0:0:ffff:{boundary_ipv4}",
+            f"{':'.join((hextets + ['1', '2', '3', '4', '5', '6'])[:6])}:{boundary_ipv4}",
+            f"{':'.join((hextets + ['1', '2', '3', '4', '5'])[:5])}::{boundary_ipv4}",
+        ]
+        mutated = random.choice(choices)
+        pos = max(mutated.rfind(":"), 0)
+        return mutated.encode(), self._field_for_position(spans, pos, default="group6")
+
     def _double_colon_position(
         self,
         data: bytes,
@@ -1507,6 +1960,39 @@ class IPv6SemanticMutator(SemanticMutator):
             )
         return b":::", "group1"
 
+    def _triple_colon_full_width(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        """Inject ':::' into a full-width address so the parser keeps 8+ tokens.
+
+        This specifically targets the decompiled IPv6 branch that checks for a
+        parsed ':::' token after the token list has already reached the normal
+        minimum width, instead of falling into the shorter-token reliability path.
+        """
+        s = self._decode(data)
+        spans = self.get_semantic_spans(data)
+        parts = [part for part in s.split(":") if re.fullmatch(r"[0-9A-Fa-f]{1,4}", part)]
+        while len(parts) < 8:
+            parts.append(random.choice(["1", "2", "db8", "dead", "beef", "ffff"]))
+        parts = parts[:9]
+
+        gap_count = max(1, len(parts) - 1)
+        gap_idx = min(
+            gap_count - 1,
+            self._guided_segment_index(":".join(parts), ":", "group", hot_bytes, preferred_fields),
+        )
+
+        mutated_parts = parts[: gap_idx + 1] + ["", ""] + parts[gap_idx + 1 :]
+        mutated = ":".join(mutated_parts)
+        field = f"group{min(gap_idx + 1, len(parts))}"
+        if ":::" not in mutated:
+            mutated = "1:2:3:4:::5:6:7:8"
+            field = "group4"
+        return mutated.encode(), self._field_for_position(spans, max(mutated.find(":::"), 0), default=field)
+
     def _compressed_overflow(
         self,
         data: bytes,
@@ -1537,6 +2023,25 @@ class IPv6SemanticMutator(SemanticMutator):
         pos = max(mutated.find("::"), 0)
         return mutated.encode(), self._field_for_position(spans, pos, default="group1")
 
+    def _dangling_compression_tail(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        if not s or "::" not in s:
+            s = random.choice([
+                "2001:db8::1",
+                "fe80::1",
+                "::ffff:192.0.2.33",
+            ])
+
+        spans = self.get_semantic_spans(data)
+        mutated = s + random.choice([":", "::"])
+        pos = max(mutated.rfind("::"), mutated.rfind(":"))
+        return mutated.encode(), self._field_for_position(spans, pos, default="group8")
+
     def _mixed_notation(
         self,
         data: bytes,
@@ -1548,6 +2053,30 @@ class IPv6SemanticMutator(SemanticMutator):
         if "::" in s:
             return f"{s}{ipv4}".encode(), "group8"
         return f"::ffff:{ipv4}".encode(), "group6"
+
+    def _invalid_mixed_suffix(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        spans = self.get_semantic_spans(data)
+        invalid_ipv4 = ".".join(
+            str(random.choice([256, 999, 4096])) for _ in range(4)
+        )
+        if "." in s and ":" in s:
+            head = s.rsplit(":", 1)[0]
+            mutated = f"{head}:{invalid_ipv4}"
+        elif "::" in s:
+            mutated = f"{s}{invalid_ipv4}"
+        else:
+            mutated = random.choice([
+                f"::ffff:{invalid_ipv4}",
+                f"2001:db8::{invalid_ipv4}",
+            ])
+        pos = max(mutated.rfind(":"), 0)
+        return mutated.encode(), self._field_for_position(spans, pos, default="group6")
 
     def _extra_groups(
         self,
@@ -1740,9 +2269,15 @@ class CidrizeSemanticMutator(SemanticMutator):
         "cidr_missing_prefix",
         "range_flip",
         "partial_range_end",
+        "separator_repeat",
+        "stacked_prefix",
+        "wildcard_repeat",
+        "range_boundary_drop",
+        "adjacent_mask",
         "wildcard_expand",
         "wildcard_damage",
         "separator_confusion",
+        "hostname_tld_edge",
         "family_mix",
         "token_duplication",
         "whitespace_injection",
@@ -1751,14 +2286,19 @@ class CidrizeSemanticMutator(SemanticMutator):
         "address_boundary",
         "replace_with_valid_example",
         "wildcard_expand",
+        "hostname_tld_edge",
     ]
 
     _IPV4_TOKEN_RE = re.compile(r"\d+(?:\.\d+){3}")
     _IPV6_TOKEN_RE = re.compile(r"(?:[0-9A-Fa-f]{0,4}:){2,}[0-9A-Fa-f:.]{0,39}")
+    _HOSTNAME_RE = re.compile(
+        r"(?<![0-9A-Za-z-])(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}(?![0-9A-Za-z-])"
+    )
     _CIDR_RE = re.compile(r"/\d{1,3}")
     _PARTIAL_RANGE_RE = re.compile(r"(\d+(?:\.\d+){3})-(\d{1,3})")
     _FULL_RANGE_RE = re.compile(r"([0-9A-Fa-f:.]+)-([0-9A-Fa-f:.]+)")
     _WILDCARD_RE = re.compile(r"\[[^\]]*\]")
+    _STAR_RE = re.compile(r"\*+")
 
     def get_semantic_spans(self, data: bytes) -> list[SemanticSpan]:
         s = self._decode(data)
@@ -1769,6 +2309,8 @@ class CidrizeSemanticMutator(SemanticMutator):
             token = match.group(0)
             if ":" in token:
                 spans.append(SemanticSpan("address", match.start(), match.end()))
+        for match in self._HOSTNAME_RE.finditer(s):
+            spans.append(SemanticSpan("hostname", match.start(), match.end()))
         for match in self._CIDR_RE.finditer(s):
             spans.append(SemanticSpan("cidr_prefix", match.start(), match.end()))
         for match in self._WILDCARD_RE.finditer(s):
@@ -1819,6 +2361,7 @@ class CidrizeSemanticMutator(SemanticMutator):
     def _address_matches(self, s: str) -> list[re.Match[str]]:
         matches = list(self._IPV4_TOKEN_RE.finditer(s))
         matches.extend(match for match in self._IPV6_TOKEN_RE.finditer(s) if ":" in match.group(0))
+        matches.extend(self._HOSTNAME_RE.finditer(s))
         matches.sort(key=lambda match: match.start())
         return matches
 
@@ -1888,6 +2431,9 @@ class CidrizeSemanticMutator(SemanticMutator):
             "192.0.2.80-192.0.2.85",
             "192.0.2.170-175",
             "192.0.2.[5678]",
+            "edge.ai",
+            "alpha.museum",
+            "svc.example.dev",
         ])
         return example.encode(), "address"
 
@@ -1951,6 +2497,81 @@ class CidrizeSemanticMutator(SemanticMutator):
         replacement = f"{match.group(1)}-{random.choice(['0', '5', '15', '175', '255', '999'])}"
         return self._replace_match(s, match, replacement).encode(), "range_end"
 
+    def _separator_repeat(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        match = self._choose_match(s, self._FULL_RANGE_RE, hot_bytes, preferred_fields, "range_sep")
+        if match is None:
+            return b"192.0.2.170--175", "range_sep"
+        left, right = match.group(1), match.group(2)
+        replacement = random.choice([f"{left}--{right}", f"{left}---{right}"])
+        return self._replace_match(s, match, replacement).encode(), "range_sep"
+
+    def _stacked_prefix(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        match = self._choose_match(s, self._CIDR_RE, hot_bytes, preferred_fields, "cidr_prefix")
+        suffix = "/" + str(random.choice([0, 1, 8, 24, 32, 64, 96, 128, 999]))
+        if match is None:
+            base = self._choose_address_match(s, hot_bytes, preferred_fields)
+            if base is None:
+                return b"192.0.2.64/24/25", "cidr_prefix"
+            return (s[: base.end()] + "/24/25" + s[base.end() :]).encode(), "cidr_prefix"
+        return (s[: match.end()] + suffix + s[match.end() :]).encode(), "cidr_prefix"
+
+    def _wildcard_repeat(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        match = self._choose_match(s, self._STAR_RE, hot_bytes, preferred_fields, "wildcard")
+        replacement = random.choice(["**", "***"])
+        if match is None:
+            address = self._choose_match(s, self._IPV4_TOKEN_RE, hot_bytes, preferred_fields, "address")
+            if address is None:
+                return b"192.0.2.**", "wildcard"
+            token = address.group(0)
+            base = token.rsplit(".", 1)[0] if token.count(".") == 3 else token
+            return self._replace_match(s, address, f"{base}.{replacement}").encode(), "wildcard"
+        return self._replace_match(s, match, replacement).encode(), "wildcard"
+
+    def _range_boundary_drop(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        match = self._choose_match(s, self._FULL_RANGE_RE, hot_bytes, preferred_fields, "range_sep")
+        if match is None:
+            return b"192.0.2.-192.0.2.85", "range_sep"
+        left, right = match.group(1), match.group(2)
+        broken_left = left.rsplit(".", 1)[0] + "." if "." in left else ""
+        return self._replace_match(s, match, f"{broken_left}-{right}").encode(), "range_sep"
+
+    def _adjacent_mask(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        match = self._choose_match(s, self._IPV4_TOKEN_RE, hot_bytes, preferred_fields, "address")
+        netmask = random.choice(["255.255.255.0", "255.255.0.0", "255.0.255.0"])
+        if match is None:
+            return f"192.0.2.0 {netmask}".encode(), "separator"
+        return self._replace_match(s, match, f"{match.group(0)} {netmask}").encode(), "separator"
+
     def _wildcard_expand(
         self,
         data: bytes,
@@ -1999,6 +2620,26 @@ class CidrizeSemanticMutator(SemanticMutator):
         return (s[:pos] + replacement + s[pos + 1 :]).encode(), self._field_for_position(
             spans, pos, default="separator"
         )
+
+    def _hostname_tld_edge(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        match = self._choose_match(s, self._HOSTNAME_RE, hot_bytes, preferred_fields, "hostname")
+        if match is None:
+            return random.choice([
+                b"edge.ai",
+                b"alpha.museum",
+                b"svc.example.dev",
+            ]), "hostname"
+        labels = match.group(0).split(".")
+        if len(labels) < 2:
+            return data, "hostname"
+        labels[-1] = random.choice(["a", "ab", "ai", "io", "dev", "cloud", "museum"])
+        return self._replace_match(s, match, ".".join(labels)).encode(), "hostname"
 
     def _family_mix(
         self,

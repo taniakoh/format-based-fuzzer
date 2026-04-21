@@ -225,16 +225,41 @@ class IPv6SeedGenerator(SeedGenerator):
     """Generates a mix of valid and structured-invalid IPv6 address strings."""
 
     BOUNDARY_GROUPS = ["0", "1", "ff", "fe", "ffff", "0001", "dead", "beef", "db8"]
+    IPV4_SUFFIXES = [
+        "0.0.0.0",
+        "1.2.3.4",
+        "13.1.68.3",
+        "129.144.52.38",
+        "192.0.2.1",
+        "192.0.2.33",
+        "255.255.255.255",
+    ]
     CURATED_VALID = [
         "::",
         "::1",
+        "1::",
+        "1::7:8",
         "2001:db8::1",
+        "2001:db8:0:1:2:3:4:5",
         "2001:db8:0:1::1",
+        "1:2:3:4:5::7:8",
+        "1:2:3:4::7:8",
+        "1:2:3::7:8",
+        "1:2::7:8",
         "fe80::1",
         "fe80::abcd:1",
         "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
         "2001:db8::192.0.2.33",
         "::192.0.2.1",
+        "::ffff:192.168.0.1",
+        "1::ffff:192.168.0.1",
+        "0:0:0:0:0:0:13.1.68.3",
+        "0:0:0:0:0:FFFF:129.144.52.38",
+        "1:2:3:4:5:6:192.168.0.1",
+        "1:2:3:4:5::192.168.0.1",
+        "1:2:3:4::192.168.0.1",
+        "1:2::192.168.0.1",
+        "1::192.168.0.1",
         "1234:5678:9abc:def0:1111:2222:3333:4444",
         "0001:0002:0003:0004:0005:0006:0007:0008",
     ]
@@ -255,12 +280,35 @@ class IPv6SeedGenerator(SeedGenerator):
         "1:::2",
         "::::",
         "::fffff:192.0.2.33",
+        "::ffff:192.0.2.999",
         "2001:db8::1::",
         "2001:db8::1:",
         "2001::db8::1",
+        "fe80::abcd:1:",
+        "1:2:3:4:::5:6:7:8",
+        "1:2:3:::4:5:6:7:8",
+        "ffff:ffff:ffff:::ffff:ffff:ffff:ffff:ffff",
         "fffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
         "1:2:3:4:5:6:7:8:9:a",
+        "1:2:3:4:5:6:7::8",
         "1:2:3:4:5:6:7::8:9",
+        # embedded IPv4 boundary: exercises IPv4_in_IPv6 with known buggy value
+        "::255.255.255.255",
+        "::ffff:255.255.255.255",
+        "0:0:0:0:0:0:255.255.255.255",
+        "1:2:3:4:5:6:255.255.255.255",
+        "1:2:3:4:5::255.255.255.255",
+        # triple-colon with exactly 7 hex groups → hits "Invalid token(':::')" path
+        "a:b:c:d:e:f:::1",
+        "1:2:3:4:5:6:::7",
+        "ffff:ffff:ffff:ffff:ffff:ffff:::ffff",
+        # triple-colon with few groups → hits "Incorrect token length" path
+        "a:b:::c",
+        "1:::2:3:4",
+        # 5-char hex in mid/tail positions (not just leading)
+        "1:2:3:4:fffff:6:7:8",
+        "1:2:3:4:5:6:7:fffff",
+        "::fffff",
     ]
 
     VALID_TEMPLATES = [
@@ -272,6 +320,13 @@ class IPv6SeedGenerator(SeedGenerator):
         "{g}::{g}:{g}:{g}",
         "{g}:{g}::{g}:{g}",
         "{g}:{g}:{g}::{g}",
+        "::ffff:{ipv4}",
+        "{g}::ffff:{ipv4}",
+        "{g}:{g}:{g}:{g}:{g}:{g}:{ipv4}",
+        "{g}:{g}:{g}:{g}:{g}::{ipv4}",
+        "{g}:{g}:{g}:{g}::{ipv4}",
+        "{g}:{g}::{ipv4}",
+        "{g}::{ipv4}",
     ]
 
     # Invalid structural forms — wrong group count, bad separators, overlong groups
@@ -280,6 +335,8 @@ class IPv6SeedGenerator(SeedGenerator):
         "{g}:{g}:{g}:{g}:{g}:{g}:{g}",          # too few groups, no ::
         "{g}::{g}::{g}",                          # multiple double-colons
         "{g}:::{g}",                              # triple-colon defect
+        "{g}:{g}:{g}:{g}:::{g}:{g}:{g}:{g}",      # triple-colon while keeping 8+ tokens
+        "{g}:{g}:{g}:::{g}:{g}:{g}:{g}:{g}",      # shifted triple-colon full-width defect
         "::{g}::{g}",                             # leading double-colon plus extra compression
         "{g}::{g}:{g}:{g}:{g}:{g}:{g}:{g}",      # compressed plus too many groups
         "{g}:{g}:{g}:{g}:{g}:{g}:{g}:{g}:",      # trailing colon
@@ -295,13 +352,45 @@ class IPv6SeedGenerator(SeedGenerator):
     def _group5(self) -> str:
         return random.choice(["fffff", "10000", "1ffff", "abcde"])
 
+    def _ipv4_suffix(self) -> str:
+        return random.choice(self.IPV4_SUFFIXES)
+
+    def _compressed_valid_variant(self) -> str:
+        return random.choice([
+            "::",
+            "::1",
+            f"{self._group()}::",
+            f"{self._group()}::{self._group()}:{self._group()}",
+            f"{self._group()}:{self._group()}::{self._group()}:{self._group()}",
+            f"{self._group()}:{self._group()}:{self._group()}::{self._group()}",
+        ])
+
+    def _embedded_ipv4_valid_variant(self) -> str:
+        ipv4 = self._ipv4_suffix()
+        return random.choice([
+            f"::{ipv4}",
+            f"::ffff:{ipv4}",
+            f"{self._group()}::ffff:{ipv4}",
+            f"{self._group()}:{self._group()}:{self._group()}:{self._group()}:{self._group()}:{self._group()}:{ipv4}",
+            f"{self._group()}:{self._group()}:{self._group()}:{self._group()}:{self._group()}::{ipv4}",
+            f"{self._group()}:{self._group()}:{self._group()}:{self._group()}::{ipv4}",
+            f"{self._group()}:{self._group()}::{ipv4}",
+            f"{self._group()}::{ipv4}",
+        ])
+
     def generate(self) -> bytes:
         if random.random() < 0.4:
             tmpl = random.choice(self.INVALID_TEMPLATES)
             addr = tmpl.format(g=self._group(), g5=self._group5())
         else:
-            tmpl = random.choice(self.VALID_TEMPLATES)
-            addr = tmpl.format(g=self._group())
+            variant_roll = random.random()
+            if variant_roll < 0.22:
+                addr = self._compressed_valid_variant()
+            elif variant_roll < 0.42:
+                addr = self._embedded_ipv4_valid_variant()
+            else:
+                tmpl = random.choice(self.VALID_TEMPLATES)
+                addr = tmpl.format(g=self._group(), ipv4=self._ipv4_suffix())
             # Occasionally append a mixed IPv4 suffix
             if random.random() < 0.15:
                 ipv4_suffix = ".".join(str(random.randint(0, 255)) for _ in range(4))
@@ -314,6 +403,8 @@ class IPv6SeedGenerator(SeedGenerator):
                     f"{addr}:",
                     f"{addr}::",
                     f"{addr}:{self._group()}",
+                    "::ffff:192.0.2.999",
+                    "2001:db8::192.0.2.999",
                 ])
         return addr.encode()
 
@@ -438,15 +529,94 @@ class JSONSeedGenerator(SeedGenerator):
         b"\xff\xfe{}",              # BOM prefix
     ]
 
+    TARGETED_VALID_SEEDS = [
+        b'"\\t"',
+        b'"\\b"',
+        b'"\\f"',
+        b'{"key":"\\t"}',
+        b'{"key":"\\b"}',
+        b'{"key":"\\f"}',
+        b'["\\t"]',
+        b'["\\b"]',
+        b'["\\f"]',
+    ]
+
+    TARGETED_INVALID_SEEDS = [
+        b'"\\u1"',
+        b'"\\u12"',
+        b'"\\u123"',
+        b'"\\u12345"',
+        b'"\\uABCDE"',
+        b'{"hex":"\\u1"}',
+        b'{"hex":"\\u12345"}',
+        b'["\\u12"]',
+        b'["\\uABCDE"]',
+    ]
+
+    @staticmethod
+    def _nested_array_seed(depth: int, leaf: str = "0") -> bytes:
+        return ("[" * depth + leaf + "]" * depth).encode("utf-8")
+
+    @staticmethod
+    def _nested_object_seed(depth: int, leaf: str = "0") -> bytes:
+        return ('{"a":' * depth + leaf + "}" * depth).encode("utf-8")
+
+    @staticmethod
+    def _huge_integer_seed(length: int, *, wrapped: bool = False) -> bytes:
+        digits = "9" * max(4301, length)
+        if wrapped:
+            return ('{"n":' + digits + "}").encode("utf-8")
+        return digits.encode("utf-8")
+
     def generate(self) -> bytes:
         import json as _json
-        if random.random() < 0.3:
+        selector = random.random()
+        if selector < 0.18:
+            return random.choice(self.TARGETED_VALID_SEEDS)
+        if selector < 0.36:
+            return random.choice(self.TARGETED_INVALID_SEEDS)
+        if selector < 0.46:
+            return random.choice([
+                self._nested_array_seed(random.choice([32, 64, 128, 256, 512])),
+                self._nested_object_seed(random.choice([24, 48, 96, 192])),
+                self._huge_integer_seed(random.choice([4301, 5000, 7000])),
+                self._huge_integer_seed(random.choice([4301, 5000]), wrapped=True),
+            ])
+        if selector < 0.66:
             return random.choice(self.INVALID_SEEDS)
         try:
             value = self._random_top_level()
             return _json.dumps(value, ensure_ascii=False).encode("utf-8")
         except (ValueError, OverflowError):
             return b"{}"
+
+    def generate_corpus(self, n: int = 100) -> list[bytes]:
+        seeds = load_seed_inputs(self._target_name(), allow_bootstrap=False)
+        seen = set(seeds)
+
+        deterministic = [
+            *self.TARGETED_VALID_SEEDS,
+            *self.TARGETED_INVALID_SEEDS,
+            self._nested_array_seed(64),
+            self._nested_array_seed(256),
+            self._nested_array_seed(1200),
+            self._nested_object_seed(64),
+            self._nested_object_seed(256),
+            self._huge_integer_seed(4301),
+            self._huge_integer_seed(5000),
+            self._huge_integer_seed(4301, wrapped=True),
+        ]
+        for seed in deterministic:
+            if seed not in seen:
+                seen.add(seed)
+                seeds.append(seed)
+
+        while len(seeds) < n:
+            candidate = self.generate()
+            if candidate not in seen:
+                seen.add(candidate)
+                seeds.append(candidate)
+        return seeds[:n]
 
 
 @SeedGenerator.register("cidrize")
@@ -457,6 +627,8 @@ class CidrizeSeedGenerator(SeedGenerator):
     IPV6_GROUPS = ["0", "1", "2", "5", "8", "64", "db8", "ffff", "abcd", "dead"]
     IPV4_PREFIXES = [0, 8, 16, 24, 26, 31, 32]
     IPV6_PREFIXES = [0, 32, 48, 64, 96, 112, 128]
+    HOST_LABELS = ["edge", "alpha", "svc", "mail", "node", "api", "cache", "demo"]
+    HOST_TLDS = ["ai", "io", "dev", "cloud", "museum", "travel", "local"]
 
     def _ipv4(self) -> str:
         return ".".join(str(random.choice(self.IPV4_OCTETS)) for _ in range(4))
@@ -472,6 +644,14 @@ class CidrizeSeedGenerator(SeedGenerator):
         template = random.choice(templates)
         return template.format(g=random.choice(self.IPV6_GROUPS), ipv4=self._ipv4())
 
+    def _hostname(self, tld: str | None = None) -> str:
+        labels = [random.choice(self.HOST_LABELS)]
+        if random.random() < 0.4:
+            labels.append(random.choice(self.HOST_LABELS))
+        suffix = tld or random.choice(self.HOST_TLDS)
+        labels.append(suffix)
+        return ".".join(labels)
+
     def _invalid(self) -> str:
         choice = random.choice([
             "bad_cidr_prefix",
@@ -479,6 +659,12 @@ class CidrizeSeedGenerator(SeedGenerator):
             "bad_octet",
             "missing_part",
             "wrong_separator",
+            "separator_repeat",
+            "stacked_prefix",
+            "wildcard_repeat",
+            "truncated_range_start",
+            "adjacent_mask",
+            "hostname_tld_edge",
         ])
         if choice == "bad_cidr_prefix":
             return f"{self._ipv4()}/{random.choice([33, 64, 128, 999])}"
@@ -490,6 +676,27 @@ class CidrizeSeedGenerator(SeedGenerator):
             return f"{random.choice([256, 300, 999])}.{self._ipv4()}"
         if choice == "missing_part":
             return random.choice(["", "/24", "-", f"{self._ipv4()}/", f"{self._ipv4()}-"])
+        if choice == "separator_repeat":
+            base = ".".join(str(random.choice(self.IPV4_OCTETS)) for _ in range(3))
+            start = random.choice([1, 8, 80, 170, 200])
+            end = random.choice([5, 15, 85, 175, 254])
+            return f"{base}.{start}{random.choice(['--', '---'])}{end}"
+        if choice == "stacked_prefix":
+            return f"{self._ipv4()}/{random.choice(self.IPV4_PREFIXES)}/{random.choice([1, 24, 64, 999])}"
+        if choice == "wildcard_repeat":
+            base = ".".join(str(random.choice(self.IPV4_OCTETS)) for _ in range(3))
+            return f"{base}.{random.choice(['**', '***'])}"
+        if choice == "truncated_range_start":
+            return f"{'.'.join(str(random.choice(self.IPV4_OCTETS)) for _ in range(3))}.-{self._ipv4()}"
+        if choice == "adjacent_mask":
+            return f"{self._ipv4()} {random.choice(['255.255.255.0', '255.255.0.0', '255.0.255.0'])}"
+        if choice == "hostname_tld_edge":
+            return random.choice([
+                self._hostname("a"),
+                self._hostname("ab"),
+                self._hostname("abcde"),
+                self._hostname("museum"),
+            ])
         # wrong_separator
         return self._ipv4().replace(".", random.choice([",", ":", " "]))
 
@@ -502,6 +709,7 @@ class CidrizeSeedGenerator(SeedGenerator):
             "ipv4_range",
             "ipv4_partial_range",
             "ipv4_wildcard",
+            "hostname",
             "ipv6",
             "ipv6_cidr",
             "ipv6_range",
@@ -527,6 +735,8 @@ class CidrizeSeedGenerator(SeedGenerator):
                 f"{base}.[{random.choice(['0123', '5678', '89'])}]",
                 f"{base}.{random.choice(['1', '8', '9'])}[0-5]",
             ])
+        elif choice == "hostname":
+            value = self._hostname(random.choice(["ai", "io", "dev", "cloud", "museum"]))
         elif choice == "ipv6":
             value = self._ipv6()
         elif choice == "ipv6_cidr":

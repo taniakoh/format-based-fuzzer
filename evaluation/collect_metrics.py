@@ -21,6 +21,21 @@ _HERE = Path(__file__).parent.parent
 RESULTS_DIR = _HERE / "results"
 _TRACEBACK_FRAME_RE = re.compile(r'^\s*File\s+"([^"]+)",\s+line\s+(\d+)')
 _BITMAP_COVERAGE_SLOTS = 65536
+_PLOT_DATA_FIELDS = [
+    "relative_time_sec",
+    "total_execs",
+    "coverage_seen",
+    "coverage_percent",
+    "interesting_test_cases",
+    "corpus_size",
+    "unique_bugs",
+    "new_unique_bugs",
+    "unique_crashes",
+    "new_unique_crashes",
+    "validity_bugs",
+    "functional_bugs",
+    "bonus_bugs",
+]
 
 
 def _first_nonempty_line(text: str) -> str:
@@ -279,6 +294,8 @@ class MetricsCollector:
         self._run_metadata: dict[str, object] = {}
         self._hash_replay_cache: dict[str, dict[str, object]] = {}
         self._hash_replay_executor = None
+        self._last_plotted_unique_bug_count = 0
+        self._last_plotted_unique_crash_count = 0
         self._out = out_dir if out_dir is not None else RESULTS_DIR / target
         (self._out / "crashes").mkdir(parents=True, exist_ok=True)
         (self._out / "logs").mkdir(parents=True, exist_ok=True)
@@ -302,19 +319,7 @@ class MetricsCollector:
         self._oracle_log_path = self._out / "oracle_log.csv"
         with open(self._plot_path, "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow([
-                "relative_time_sec",
-                "total_execs",
-                "coverage_seen",
-                "coverage_percent",
-                "interesting_test_cases",
-                "corpus_size",
-                "unique_bugs",
-                "unique_crashes",
-                "validity_bugs",
-                "functional_bugs",
-                "bonus_bugs",
-            ])
+            writer.writerow(_PLOT_DATA_FIELDS)
         with open(self._energy_log_path, "w", encoding="utf-8", newline="") as f:
             csv.writer(f).writerow(["relative_time_sec", "seed_id", "energy"])
         with open(self._oracle_log_path, "w", encoding="utf-8", newline="") as f:
@@ -576,6 +581,8 @@ class MetricsCollector:
 
     def record_plot_point(self, corpus_size: int) -> None:
         """Append one progress sample to plot_data."""
+        new_unique_bugs = self.metrics.unique_bug_count - self._last_plotted_unique_bug_count
+        new_unique_crashes = self.metrics.unique_crashes - self._last_plotted_unique_crash_count
         with open(self._plot_path, "a", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             writer.writerow([
@@ -585,14 +592,18 @@ class MetricsCollector:
                 f"{_coverage_percent(self.metrics.behaviors_covered):.6f}",
                 self.metrics.interesting_test_case_count,
                 corpus_size,
-                # Keep the graph aligned with logs/bug_counts.csv by plotting
-                # parser-site deduplicated bug sites rather than only real bugs.
-                self.metrics.parser_site_unique_bug_count,
+                # Progress graphs should reflect the canonical real-bug count
+                # shown in stats.txt and unique_bugs.json.
+                self.metrics.unique_bug_count,
+                max(0, new_unique_bugs),
                 self.metrics.unique_crashes,
+                max(0, new_unique_crashes),
                 self.metrics.validity_bugs,
                 self.metrics.functional_bugs,
                 self.metrics.bonus_bugs,
             ])
+        self._last_plotted_unique_bug_count = self.metrics.unique_bug_count
+        self._last_plotted_unique_crash_count = self.metrics.unique_crashes
 
     def record_energy(self, seed: bytes, energy: float) -> None:
         """Append one seed-energy sample to energy_log.csv (logged every cycle)."""

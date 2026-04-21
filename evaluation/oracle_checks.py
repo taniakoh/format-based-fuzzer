@@ -26,6 +26,23 @@ from fuzzer.executor import (
 from fuzzer.oracle import evaluate_target_input
 
 
+def _run_json_decoder_depth_checks() -> None:
+    json_root = _HERE / "json-decoder-main"
+    if str(json_root) not in sys.path:
+        sys.path.insert(0, str(json_root))
+
+    from buggy_json import loads as buggy_json_loads
+    from buggy_json.decoder_stv import JSONDecodeError
+
+    nested_array = "[" * 700 + "0" + "]" * 700
+    try:
+        buggy_json_loads(nested_array)
+    except JSONDecodeError as exc:
+        assert "Maximum nesting depth exceeded" in str(exc), exc
+    else:
+        raise AssertionError("buggy_json should reject excessively nested arrays")
+
+
 def _assert_verdict(
     target: str,
     value: str,
@@ -57,6 +74,11 @@ def _run_oracle_shape_checks() -> None:
     _assert_verdict("cidrize", "192.0.2.8[0-5]", supported=True, expected_valid=True, shape="ipv4_wildcard_range")
     _assert_verdict("cidrize", "192.0.2.[5-0]", supported=True, expected_valid=False, shape="ipv4_wildcard_range")
     _assert_verdict("cidrize", "192.0.2.[5-]", supported=True, expected_valid=False, shape="malformed")
+    _assert_verdict("cidrize", "192.0.2.170--175", supported=True, expected_valid=False, shape="ipv4_range")
+    _assert_verdict("cidrize", "192.0.2.64/24/25", supported=True, expected_valid=False, shape="network")
+    _assert_verdict("cidrize", "192.0.2.**", supported=True, expected_valid=False, shape="plain_address")
+    _assert_verdict("cidrize", "192.0.2.-192.0.2.85", supported=True, expected_valid=False, shape="ipv4_range")
+    _assert_verdict("cidrize", "192.0.2.0 255.255.255.0", supported=True, expected_valid=False, shape="plain_address")
     _assert_verdict("cidrize", "hostname", supported=False, expected_valid=None, shape="unsupported")
 
 
@@ -100,7 +122,8 @@ def _run_executor_integration_checks() -> None:
         traceback="Traceback\nParseException: no",
     )
     result = Executor._apply_oracle(stub, rejected_valid)
-    assert result.bug_type == BugType.INVALIDITY, result
+    assert result.bug_type == BugType.VALIDITY, result
+    assert result.oracle is not None, result
 
     accepted_invalid = RunResult(
         input_str="192.0.2.85-192.0.2.80",
@@ -110,7 +133,8 @@ def _run_executor_integration_checks() -> None:
         stderr="",
     )
     result = Executor._apply_oracle(stub, accepted_invalid)
-    assert result.bug_type == BugType.PASS, result
+    assert result.bug_type == BugType.ORACLE_MISMATCH, result
+    assert result.oracle is not None, result
 
     reported_functional = RunResult(
         input_str="hostname",
@@ -124,6 +148,33 @@ def _run_executor_integration_checks() -> None:
     result = Executor._apply_oracle(stub, reported_functional)
     assert result.bug_type == BugType.FUNCTIONAL, result
     assert result.exception_msg == "accepted malformed mixed-family input", result
+    assert result.oracle is not None, result
+
+    traced_bonus = RunResult(
+        input_str="2001:db8:::1",
+        bug_type=BugType.PASS,
+        exit_code=0,
+        stdout="",
+        stderr="",
+        exception_msg="ReliabilityBug: malformed compression",
+        traceback="Traceback\nReliabilityBug: malformed compression",
+    )
+    result = Executor._apply_oracle(stub, traced_bonus)
+    assert result.bug_type == BugType.BONUS, result
+    assert result.oracle is not None, result
+
+    parser_invalidity_on_valid = RunResult(
+        input_str="::",
+        bug_type=BugType.PASS,
+        exit_code=1,
+        stdout="",
+        stderr="",
+        parser_reported_bug_type=BugType.INVALIDITY,
+        parser_reported_message="rejected all-zero shorthand",
+    )
+    result = Executor._apply_oracle(stub, parser_invalidity_on_valid)
+    assert result.bug_type == BugType.VALIDITY, result
+    assert result.oracle is not None, result
 
     timeout_bitmap = _result_to_bitmap(
         RunResult(
@@ -177,6 +228,8 @@ def _run_frida_agent_flush_checks() -> None:
     assert "Stalker.flush();" in source, "agent should force pending stalker events out of Frida buffers"
     assert "rpc.exports.dispose" in source, "agent should flush buffered edges during teardown"
     assert 'trigger: "dispose"' in source, "teardown flush should be observable in debug logs"
+    assert "DebugSymbol.fromAddress" in source, "agent should prefer symbolicated file/line coverage when available"
+    assert "fallbackEdgeSlot" in source, "agent should keep block-hash coverage as a fallback when symbolication is absent"
 
 
 def _run_frida_mode_selection_checks() -> None:
@@ -233,6 +286,7 @@ def _run_missing_frida_checks() -> None:
 
 
 def main() -> None:
+    _run_json_decoder_depth_checks()
     _run_oracle_shape_checks()
     _run_family_variation_checks()
     _run_executor_integration_checks()

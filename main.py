@@ -1,7 +1,7 @@
 """
 Hybrid Coverage-Guided Fuzzer - Entry Point.
 
-Targets : IPv4/IPv6/cidrize parser binaries plus a JSON decoder target
+Targets : IPv4/IPv6/cidrize parser binaries plus JSON and XML Atheris targets
 Stack   : Python 3.11+, three-tier mutation engine, behavior-based coverage
 
 Binary-target evaluation modes:
@@ -14,6 +14,7 @@ Usage:
     python main.py ipv4 [--havoc-iters N] [--time-budget S] [--seed RNG]
     python main.py ipv6 [--havoc-iters N] [--time-budget S] [--seed RNG]
     python main.py json [--time-budget S] [--seed RNG]
+    python main.py xml  [--time-budget S] [--seed RNG]
     python main.py cidrize [--havoc-iters N] [--time-budget S] [--seed RNG]
     python main.py all  [--havoc-iters N] [--time-budget S] [--seed RNG]
 
@@ -27,12 +28,15 @@ Options:
 """
 
 import argparse
+import atexit
 import concurrent.futures
 import hashlib
 import json
 import os
 import random
+import signal
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -42,6 +46,7 @@ from collections import Counter, deque
 from pathlib import Path
 
 from evaluation.collect_metrics import MetricsCollector, derive_bug_site
+from evaluation.json_coverage_replay import generate_json_atheris_replay_coverage
 from fuzzer.bootstrap import ensure_bootstrap_profile
 from fuzzer.corpus import Corpus
 from fuzzer.coverage import CoverageAnalyzer
@@ -101,11 +106,65 @@ def _checkpoint_key(target: str, run_id: str) -> str:
     return f"{target}_{run_id}" if run_id else target
 
 
+def _handle_remove_readonly(func, path, exc_info) -> None:
+    """Best-effort rmtree callback for Windows/WSL read-only artifacts."""
+    exc = exc_info[1]
+    if not isinstance(exc, PermissionError):
+        raise exc
+    os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+    func(path)
+
+
+def _clear_directory_contents(path: Path) -> None:
+    """Remove all children of *path* while keeping *path* itself.
+
+    This is a safer fallback for WSL-on-NTFS cases where deleting the mount
+    backed directory itself fails even though its contents can be removed.
+    """
+    if not path.exists():
+        return
+    for child in path.iterdir():
+        if child.is_dir():
+            _remove_tree_with_retries(child)
+        else:
+            try:
+                os.chmod(child, stat.S_IWRITE | stat.S_IREAD)
+            except OSError:
+                pass
+            child.unlink(missing_ok=True)
+
+
+def _remove_tree_with_retries(path: Path, retries: int = 6, delay_secs: float = 0.25) -> None:
+    """Remove *path* robustly across Windows/WSL filesystems.
+
+    WSL runs against ``/mnt/c`` can intermittently hit ``PermissionError`` when
+    a file is read-only or a just-finished process still has a handle open.
+    Retry a few times before giving up so ``--fresh-start`` remains usable.
+    """
+    last_error: Exception | None = None
+    for attempt in range(retries):
+        try:
+            shutil.rmtree(path, onerror=_handle_remove_readonly)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError as exc:
+            last_error = exc
+            if attempt == retries - 1:
+                break
+            time.sleep(delay_secs * (attempt + 1))
+    if last_error is not None:
+        raise last_error
+
+
 def _reset_target_state(target: str, run_id: str = "") -> None:
     """Remove prior run artifacts and model checkpoint for a clean restart."""
     results_dir = _run_dir(target, run_id)
     if results_dir.exists():
-        shutil.rmtree(results_dir)
+        try:
+            _remove_tree_with_retries(results_dir)
+        except PermissionError:
+            _clear_directory_contents(results_dir)
         print(f"[*] Fresh start   : cleared {results_dir}")
 
     ck = _checkpoint_key(target, run_id)
@@ -365,6 +424,8 @@ def _run_atheris_target(
 ) -> None:
     """Run an Atheris-backed target in a subprocess-managed campaign."""
     print("[*] Instrumentation: atheris")
+    harness_relpath = str(fmt.get("atheris_harness", "fuzzer/json_atheris_harness.py"))
+    harness_path = (_HERE / harness_relpath).resolve()
 
     phase_clock = time.perf_counter()
     generator = get_seed_generator(target, fmt)
@@ -401,7 +462,7 @@ def _run_atheris_target(
         "format_config": fmt,
         "seed_corpus_dir": str(corpus_dir),
         "crashes_dir": str(crashes_dir),
-        "harness": str(_HERE / "fuzzer" / "json_atheris_harness.py"),
+        "harness": str(harness_path),
     }
     (results_dir / "fuzzer_config").write_text(
         json.dumps(config_payload, indent=2, sort_keys=True) + "\n",
@@ -411,12 +472,12 @@ def _run_atheris_target(
     cmd = [
         sys.executable,
         "-u",
-        str(_HERE / "fuzzer" / "json_atheris_harness.py"),
+        str(harness_path),
         str(corpus_dir),
         f"-artifact_prefix={str(crashes_dir)}{os.sep}",
         f"-max_total_time={time_budget_secs}",
         "-print_final_stats=1",
-        "-timeout=5",
+        "-timeout=15",
         "-ignore_timeouts=1",
     ]
     env = os.environ.copy()
@@ -465,6 +526,14 @@ def _run_atheris_target(
         return_code = proc.wait()
 
     stop_event.set()
+
+    if target == "json":
+        try:
+            coverage_replay_path = generate_json_atheris_replay_coverage(results_dir)
+            if coverage_replay_path is not None:
+                print(f"[*] Source coverage: wrote {coverage_replay_path}")
+        except Exception as exc:
+            print(f"[!] Source coverage replay skipped: {exc}")
 
     crash_count = len(list(crashes_dir.glob("*")))
     corpus_count = len(list(corpus_dir.glob("*")))
@@ -516,11 +585,12 @@ def _atheris_bug_record(
     }
 
 
-def _classify_atheris_crash(crash_file: Path) -> dict[str, object]:
-    """Re-run one Atheris crash input and return bug metadata for deduplication."""
+def _classify_json_atheris_crash(crash_file: Path) -> dict[str, object]:
     name = crash_file.name
     if name.startswith("timeout-") or name.startswith("slow-"):
-        return _atheris_bug_record("TIMEOUT", "Buggy JSON decoder timed out", exc_type="PerformanceBug")
+        bug_record = _atheris_bug_record("TIMEOUT", "Buggy JSON decoder timed out", exc_type="PerformanceBug")
+        bug_record["artifact_only"] = True
+        return bug_record
     if name.startswith("oom-"):
         return _atheris_bug_record("CRASH", "Out of memory", exc_type="MemoryError")
 
@@ -542,11 +612,29 @@ def _classify_atheris_crash(crash_file: Path) -> dict[str, object]:
             ref_ok = False
             ref_exc = exc
 
+        alarm_supported = hasattr(signal, "SIGALRM") and hasattr(signal, "alarm")
+        old_alarm_handler = None
+        if alarm_supported:
+            old_alarm_handler = signal.getsignal(signal.SIGALRM)
+
+            def _atheris_replay_timeout_handler(signum, frame):
+                raise TimeoutError("buggy_json timed out during artifact replay")
+
+            signal.signal(signal.SIGALRM, _atheris_replay_timeout_handler)
+            signal.alarm(12)
+
         try:
             candidate_value = buggy_loads(data)
             candidate_ok = True
             candidate_exc = None
             candidate_tb = ""
+        except TimeoutError as exc:
+            return _atheris_bug_record(
+                "TIMEOUT",
+                f"Buggy JSON decoder timed out during artifact replay: {exc}",
+                traceback_text="".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+                exc_type=type(exc).__name__,
+            )
         except PerformanceBug as exc:
             return _atheris_bug_record(
                 "TIMEOUT",
@@ -554,7 +642,7 @@ def _classify_atheris_crash(crash_file: Path) -> dict[str, object]:
                 traceback_text="".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
                 exc_type=type(exc).__name__,
             )
-        except (JSONDecodeError, InvalidityBug, UnicodeDecodeError, ValueError) as exc:
+        except (JSONDecodeError, InvalidityBug, UnicodeDecodeError, ValueError, RecursionError) as exc:
             candidate_ok = False
             candidate_exc = exc
             candidate_tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
@@ -565,6 +653,10 @@ def _classify_atheris_crash(crash_file: Path) -> dict[str, object]:
                 traceback_text="".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
                 exc_type=type(exc).__name__,
             )
+        finally:
+            if alarm_supported:
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, old_alarm_handler)
 
         if ref_ok and not candidate_ok:
             if isinstance(candidate_exc, InvalidityBug):
@@ -607,6 +699,137 @@ def _classify_atheris_crash(crash_file: Path) -> dict[str, object]:
         )
 
 
+def _classify_xml_atheris_crash(crash_file: Path) -> dict[str, object]:
+    name = crash_file.name
+    if name.startswith("timeout-") or name.startswith("slow-"):
+        return _atheris_bug_record("TIMEOUT", "XML parser timed out", exc_type="TimeoutError")
+    if name.startswith("oom-"):
+        return _atheris_bug_record("CRASH", "Out of memory", exc_type="MemoryError")
+
+    try:
+        from xml.dom import Node
+        from xml.dom import minidom
+        from xml.etree import ElementTree as ET
+        from xml.parsers.expat import ExpatError
+
+        data = crash_file.read_bytes()
+        lowered = data.lower()
+        if b"<!doctype" in lowered or b"<!entity" in lowered:
+            return _atheris_bug_record(
+                "invalidity",
+                "Input is outside the XML benchmark subset",
+            )
+
+        def _local_name(tag: str) -> str:
+            if tag.startswith("{") and "}" in tag:
+                return tag.rsplit("}", 1)[-1]
+            return tag.split(":", 1)[-1]
+
+        def _et_summary(root: ET.Element) -> tuple[str, int, int, tuple[str, ...]]:
+            names = [_local_name(node.tag) for node in root.iter() if isinstance(node.tag, str)]
+            attr_count = sum(len(node.attrib) for node in root.iter() if isinstance(node.tag, str))
+            return _local_name(root.tag), len(names), attr_count, tuple(names[:32])
+
+        def _semantic_dom_attr_count(node: Node) -> int:
+            attributes = getattr(node, "attributes", None)
+            if not attributes:
+                return 0
+            count = 0
+            for idx in range(attributes.length):
+                attr = attributes.item(idx)
+                if attr is None:
+                    continue
+                attr_name = getattr(attr, "name", "") or ""
+                if attr_name == "xmlns" or attr_name.startswith("xmlns:"):
+                    continue
+                count += 1
+            return count
+
+        def _minidom_summary(doc: minidom.Document) -> tuple[str, int, int, tuple[str, ...]]:
+            names: list[str] = []
+            attr_count = 0
+
+            def walk(node: Node) -> None:
+                nonlocal attr_count
+                if node.nodeType == Node.ELEMENT_NODE:
+                    names.append(node.nodeName.split(":", 1)[-1])
+                    attr_count += _semantic_dom_attr_count(node)
+                for child in getattr(node, "childNodes", []):
+                    walk(child)
+
+            walk(doc.documentElement)
+            root_name = names[0] if names else "unknown"
+            return root_name, len(names), attr_count, tuple(names[:32])
+
+        try:
+            ref_root = ET.fromstring(data)
+            ref_ok = True
+            ref_exc = None
+        except (ET.ParseError, UnicodeDecodeError, ValueError) as exc:
+            ref_root = None
+            ref_ok = False
+            ref_exc = exc
+
+        try:
+            candidate_doc = minidom.parseString(data)
+            candidate_ok = True
+            candidate_exc = None
+        except (ExpatError, UnicodeDecodeError, ValueError) as exc:
+            candidate_doc = None
+            candidate_ok = False
+            candidate_exc = exc
+        except Exception as exc:
+            return _atheris_bug_record(
+                "CRASH",
+                f"minidom crashed during artifact replay: {exc}",
+                traceback_text="".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+                exc_type=type(exc).__name__,
+            )
+
+        if ref_ok and not candidate_ok:
+            return _atheris_bug_record(
+                "validity",
+                f"ElementTree accepted, minidom rejected: {candidate_exc}",
+                exc_type=type(candidate_exc).__name__ if candidate_exc is not None else "",
+            )
+        if not ref_ok and candidate_ok:
+            return _atheris_bug_record(
+                "oracle_mismatch",
+                f"ElementTree rejected, minidom accepted: {ref_exc}",
+                exc_type=type(ref_exc).__name__ if ref_exc is not None else "",
+            )
+        if ref_ok and candidate_ok:
+            if _et_summary(ref_root) != _minidom_summary(candidate_doc):
+                return _atheris_bug_record(
+                    "oracle_mismatch",
+                    "ElementTree and minidom produced different structural summaries",
+                )
+            return _atheris_bug_record(
+                "oracle_mismatch",
+                "Both XML parsers accepted the input during replay",
+            )
+        return _atheris_bug_record(
+            "invalidity",
+            "Both XML parsers rejected the input",
+            exc_type=type(candidate_exc).__name__ if candidate_exc is not None else "",
+        )
+    except Exception as exc:
+        return _atheris_bug_record(
+            "CRASH",
+            f"Re-classification failed: {exc}",
+            traceback_text="".join(traceback.format_exception(type(exc), exc, exc.__traceback__)),
+            exc_type=type(exc).__name__,
+        )
+
+
+def _classify_atheris_crash(target: str, crash_file: Path) -> dict[str, object]:
+    """Re-run one Atheris crash input and return bug metadata for deduplication."""
+    target_name = target.lower()
+    if target_name == "xml":
+        return _classify_xml_atheris_crash(crash_file)
+    return _classify_json_atheris_crash(crash_file)
+
+
 def _postprocess_atheris_results(
     target: str,
     results_dir: Path,
@@ -628,6 +851,8 @@ def _postprocess_atheris_results(
     traceback_bug_signatures: set[str] = set()
     bug_count_rows: dict[str, dict[str, object]] = {}
     raw_bug_count_rows: list[dict[str, object]] = []
+    artifact_classification_cache: dict[str, dict[str, object]] = {}
+    reported_crash_count = 0
 
     for crash_file in crash_files:
         try:
@@ -636,7 +861,16 @@ def _postprocess_atheris_results(
         except Exception:
             continue
 
-        bug_record = _classify_atheris_crash(crash_file)
+        input_digest = hashlib.sha1(raw).hexdigest()
+        if input_digest in artifact_classification_cache:
+            bug_record = artifact_classification_cache[input_digest]
+        else:
+            bug_record = _classify_atheris_crash(target, crash_file)
+            artifact_classification_cache[input_digest] = bug_record
+        if bool(bug_record.get("artifact_only", False)):
+            continue
+
+        reported_crash_count += 1
         bug_type = str(bug_record["bug_type"])
         exc_msg = str(bug_record["exception"])
         is_instrumentation_noise = bug_type == "CRASH" and _is_instrumentation_noise_message(exc_msg)
@@ -748,7 +982,7 @@ def _postprocess_atheris_results(
     )
 
     # bug_coverage_summary.json
-    total_crashes = len(crash_files)
+    total_crashes = reported_crash_count
     (results_dir / "bug_coverage_summary.json").write_text(
         json.dumps({
             "target": target,
@@ -826,13 +1060,44 @@ def _postprocess_atheris_results(
     # minimal plot_data CSV so plot_progress.py can render a chart
     plot_path = results_dir / "plot_data"
     if not plot_path.exists():
-        with open(plot_path, "w", encoding="utf-8", newline="") as f:
-            writer = _csv.writer(f)
-            writer.writerow([
-                "relative_time_sec", "total_execs", "coverage_seen",
-                "interesting_test_cases", "corpus_size", "unique_bugs", "unique_crashes",
-            ])
-            writer.writerow([round(duration, 3), 0, 0, 0, 0, len(unique_bugs), total_crashes])
+        if not _write_plot_data_from_logs(
+            results_dir,
+            duration=duration,
+            unique_bug_count=len(unique_bugs),
+            total_crashes=total_crashes,
+        ):
+            with open(plot_path, "w", encoding="utf-8", newline="") as f:
+                writer = _csv.writer(f)
+                writer.writerow([
+                    "relative_time_sec",
+                    "total_execs",
+                    "coverage_seen",
+                    "coverage_percent",
+                    "interesting_test_cases",
+                    "corpus_size",
+                    "unique_bugs",
+                    "new_unique_bugs",
+                    "unique_crashes",
+                    "new_unique_crashes",
+                    "validity_bugs",
+                    "functional_bugs",
+                    "bonus_bugs",
+                ])
+                writer.writerow([
+                    round(duration, 3),
+                    0,
+                    0,
+                    f"{0.0:.6f}",
+                    0,
+                    0,
+                    len(unique_bugs),
+                    len(unique_bugs),
+                    total_crashes,
+                    total_crashes,
+                    0,
+                    0,
+                    0,
+                ])
 
     stats_lines = [
         f"Target          : {target}",
@@ -855,6 +1120,97 @@ def _postprocess_atheris_results(
 def _elapsed_ms(start_time: float) -> float:
     """Return milliseconds elapsed since start_time."""
     return (time.perf_counter() - start_time) * 1000.0
+
+
+def _write_plot_data_from_logs(
+    results_dir: Path,
+    *,
+    duration: float,
+    unique_bug_count: int,
+    total_crashes: int,
+) -> bool:
+    """Backfill plot_data from per-exec logs when canonical rows are missing."""
+    import csv as _csv
+
+    oracle_log_path = results_dir / "oracle_log.csv"
+    unique_bugs_path = results_dir / "unique_bugs.json"
+    if not oracle_log_path.exists() or not unique_bugs_path.exists():
+        return False
+
+    with open(oracle_log_path, "r", encoding="utf-8", newline="") as f:
+        oracle_rows = list(_csv.DictReader(f))
+    if not oracle_rows:
+        return False
+
+    try:
+        unique_bug_payload = json.loads(unique_bugs_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+
+    unique_bug_entries = unique_bug_payload.get("entries", [])
+    bug_exec_counts = Counter(
+        int(entry.get("first_seen_exec", 0) or 0)
+        for entry in unique_bug_entries
+        if int(entry.get("first_seen_exec", 0) or 0) > 0
+    )
+
+    plot_path = results_dir / "plot_data"
+    with open(plot_path, "w", encoding="utf-8", newline="") as f:
+        writer = _csv.writer(f)
+        writer.writerow([
+            "relative_time_sec",
+            "total_execs",
+            "coverage_seen",
+            "coverage_percent",
+            "interesting_test_cases",
+            "corpus_size",
+            "unique_bugs",
+            "new_unique_bugs",
+            "unique_crashes",
+            "new_unique_crashes",
+            "validity_bugs",
+            "functional_bugs",
+            "bonus_bugs",
+        ])
+
+        cumulative_bugs = 0
+        for exec_no, row in enumerate(oracle_rows, start=1):
+            new_unique_bugs = int(bug_exec_counts.get(exec_no, 0))
+            cumulative_bugs += new_unique_bugs
+            writer.writerow([
+                f"{float(row.get('relative_time_sec', 0.0) or 0.0):.3f}",
+                exec_no,
+                0,
+                f"{0.0:.6f}",
+                0,
+                0,
+                cumulative_bugs,
+                new_unique_bugs,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ])
+
+        last_time = float(oracle_rows[-1].get("relative_time_sec", 0.0) or 0.0)
+        if duration > last_time:
+            writer.writerow([
+                f"{duration:.3f}",
+                len(oracle_rows),
+                0,
+                f"{0.0:.6f}",
+                0,
+                0,
+                cumulative_bugs if unique_bug_count == 0 else unique_bug_count,
+                0,
+                total_crashes,
+                total_crashes,
+                0,
+                0,
+                0,
+            ])
+    return True
 
 
 def _json_safe_metadata(metadata: dict | None) -> dict:
@@ -905,6 +1261,7 @@ def fuzz(
     fixed_lr: bool = False,
     run_id: str = "",
     coverage_mode: str = "auto",
+    persistent_mode: bool = False,
 ) -> None:
     """Run the hybrid fuzzer against one target."""
 
@@ -1039,7 +1396,7 @@ def fuzz(
                 target=_init_dl_background, daemon=True, name="dl-init"
             ).start()
             print(
-                f"[*] Scheduler     : StaticScheduler → DLScheduler (CUDA warming up in background) "
+                f"[*] Scheduler     : StaticScheduler -> DLScheduler (CUDA warming up in background) "
                 f"({_elapsed_ms(phase_clock):7.1f} ms)"
             )
 
@@ -1048,7 +1405,8 @@ def fuzz(
     print(f"[*] Havoc primed  : {_elapsed_ms(phase_clock):7.1f} ms")
 
     phase_clock = time.perf_counter()
-    executor = Executor(target, coverage_mode=coverage_mode)
+    executor = Executor(target, coverage_mode=coverage_mode, persistent_mode=persistent_mode)
+    atexit.register(executor.close)
     coverage = CoverageAnalyzer(use_afl_hit_count_buckets=executor.mode == "Frida")
     metrics = MetricsCollector(target, out_dir=_run_dir(target, run_id))
 
@@ -1069,6 +1427,7 @@ def fuzz(
             "seeds_n": seeds_n,
             "evaluation_mode_requested": evaluation_mode,
             "evaluation_mode_resolved": resolved_mode,
+            "persistent_mode": persistent_mode,
             "executor_mode": executor.mode,
             "binary_path": str(executor.binary),
             "scheduler": type(scheduler).__name__,
@@ -1483,6 +1842,7 @@ def fuzz(
         f"Coverage: {final.behaviors_covered} | "
         f"Corpus size: {len(corpus)}"
     )
+    executor.close()
 
 
 def _fuzz_worker(kwargs: dict) -> None:
@@ -1522,7 +1882,7 @@ def main() -> None:
         "target",
         help=(
             "Parser to fuzz (e.g. ipv4, ipv6, json, or any registered format; "
-            "'all' runs ipv4+ipv6+cidrize; use 'bootstrap <target>' to cache "
+            "'all' runs ipv4+ipv6+cidrize+json; use 'bootstrap <target>' to cache "
             "LLM/manual seed profiles for new formats)"
         ),
     )
@@ -1636,6 +1996,15 @@ def main() -> None:
             "'hash' forces behavior-hash bitmap regardless of platform (default: auto)"
         ),
     )
+    parser.add_argument(
+        "--persistent",
+        action="store_true",
+        help=(
+            "Use a long-lived Python worker for extracted Linux ipv4/ipv6 parser bundles. "
+            "This improves throughput by avoiding per-input startup, but uses behavior-hash "
+            "coverage instead of Frida."
+        ),
+    )
     args = parser.parse_args()
 
     random.seed(args.seed)
@@ -1662,6 +2031,7 @@ def main() -> None:
         no_retrain=args.no_retrain,
         fixed_lr=args.fixed_lr,
         coverage_mode=args.coverage,
+        persistent_mode=args.persistent,
     )
 
     def _expand_worker_kwargs(targets: list[str]) -> list[dict]:

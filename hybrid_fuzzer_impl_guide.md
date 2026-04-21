@@ -65,6 +65,12 @@ hybrid-fuzzer/
 Each format is a JSON config that drives the entire pipeline. Adding a new format (e.g., XML) only requires a new config file — no engine changes.
 
 **`config/json_format.json`**
+
+Why this matters: onboarding another format is not just feature growth. It is a
+direct test of the repository's main claim that the fuzzing engine can transfer
+to new structured inputs through configuration and small target-aware
+extensions, instead of requiring a fresh engine design for each parser family.
+
 ```json
 {
   "format": "JSON",

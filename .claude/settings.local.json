@@ -55,7 +55,8 @@
       "Bash(sed -n '238,260p' /c/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/main.py)",
       "Bash(sed -n '617,700p' /c/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/main.py)",
       "Bash(sed -n '1000,1010p' /c/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/main.py)",
-      "Bash(sed -n '1050,1060p' /c/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/main.py)"
+      "Bash(sed -n '1050,1060p' /c/Users/tanta/Downloads/Code/softwaretesting/format-based-fuzzer/main.py)",
+      "Bash(python3.13 --version)"
     ]
   }
 }

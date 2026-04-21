@@ -1,0 +1,86 @@
+{
+  "format_kind": "text",
+  "generated_at": "2026-04-20T21:55:57+00:00",
+  "generic_mutation_hints": {
+    "avoid_magic_prefix_damage": false,
+    "avoid_operations": [
+      "arithmetic"
+    ],
+    "prefer_operations": [
+      "insert_random",
+      "delete_range",
+      "byte_substitute",
+      "splice",
+      "whitespace_injection"
+    ],
+    "preserve_magic_bytes": false
+  },
+  "mutation_hints": {
+    "avoid_magic_prefix_damage": false,
+    "avoid_operations": [
+      "arithmetic"
+    ],
+    "prefer_operations": [
+      "insert_random",
+      "delete_range",
+      "byte_substitute",
+      "splice",
+      "whitespace_injection"
+    ],
+    "preserve_magic_bytes": false
+  },
+  "seed_encoding": "utf-8",
+  "seed_examples_invalid": [
+    "<root>",
+    "<root><child></root>",
+    "<root attr=value/>",
+    "<root><child></child>",
+    "<root><child></chil></root>",
+    "<root><child>text</child",
+    "<root><child></child></root",
+    "<?xml version=\"1.0\"?><root",
+    "<root><!CDATA[some <unsafe> text]]></root>",
+    "<root><child></child></root extra>",
+    "<root attr='value></root>"
+  ],
+  "seed_examples_valid": [
+    "<root/>",
+    "<root></root>",
+    "<root><child/></root>",
+    "<root><child>text</child></root>",
+    "<root attr=\"value\"/>",
+    "<root a=\"1\" b=\"two\"/>",
+    "<root><a/><b/><c/></root>",
+    "<root><!--comment--><child/></root>",
+    "<root><![CDATA[some <unsafe> text]]></root>",
+    "<?xml version=\"1.0\"?><root/>",
+    "<ns:root xmlns:ns=\"urn:test\"><ns:item/></ns:root>"
+  ],
+  "source": "llm_bootstrap",
+  "target": "xml",
+  "token_hints": {
+    "delimiters": [
+      "/",
+      "<",
+      ">",
+      "=",
+      "\"",
+      "'"
+    ],
+    "field_like_regions": [
+      "tag",
+      "attribute",
+      "text",
+      "comment",
+      "cdata",
+      "declaration"
+    ],
+    "length_fields": [],
+    "magic_bytes": [],
+    "section_markers": [
+      "<?xml",
+      "<!--",
+      "<![CDATA["
+    ]
+  }
+}

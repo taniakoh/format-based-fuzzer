@@ -10,6 +10,11 @@ import tempfile
 import json
 import coverage
 
+
+class BonusBug(Exception):
+    """Opt-in exception used to exercise the harness bonus path."""
+    pass
+
 def print_full_coverage_summary(cov):
     """
     Prints line, branch, and combined coverage using coverage.py JSON report.
@@ -216,6 +221,11 @@ Using json from the shell to validate and pretty-print::
     parser.add_argument("--show-coverage", help="Display coverage report after execution", action="store_true")
     parser.add_argument("--reset-coverage", help="Reset coverage data before this run", action="store_true")
     parser.add_argument("--coverage-summary", help="Show only coverage summary without running any function", action="store_true")
+    parser.add_argument(
+        "--trigger-bonus",
+        help="Intentionally raise an unexpected exception after decoding to test the bonus bug bucket.",
+        action="store_true",
+    )
     args = parser.parse_args()
     
     bug_count = defaultdict(int)
@@ -260,6 +270,8 @@ Using json from the shell to validate and pretty-print::
     
     try:
         data = loads(args.str_json) 
+        if args.trigger_bonus:
+            raise BonusBug("Intentional bonus-path trigger for harness validation")
         print(f"Output decoded data: {data} of type {type(data)}")
     except PerformanceBug as e:
         print(f"A performance bug has been triggered: {e}")

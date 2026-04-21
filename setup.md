@@ -151,11 +151,12 @@ python --version
 # Single target
 python main.py ipv4 --time-budget 3600 --fresh-start
 python main.py ipv6 --time-budget 3600 --fresh-start
-python main.py cidrize --time-budget 300 --fresh-start
+python main.py cidrize --time-budget 3600 --fresh-start
 python main.py cjson --time-budget 300 --fresh-start
-python main.py json --time-budget 300 --fresh-start
+python main.py json --time-budget 3600 --fresh-start
+python main.py xml --time-budget 3600 --fresh-start
 
-# All targets in parallel (ipv4, ipv6, cidrize, json run simultaneously)
+# Default multi-target run (ipv4, ipv6, cidrize, json run simultaneously)
 python main.py all --time-budget 300 --fresh-start
 ```
 
@@ -171,6 +172,12 @@ type results/ipv4/stats.txt
 python evaluation/plot_progress.py ipv4
 python evaluation/plot_progress.py ipv6
 
+# 2b. JSON source-coverage replay and plot refresh
+# This computes absolute coverage.py statement+branch coverage for buggy_json
+# from the saved Atheris corpus and updates progress.svg to use it.
+python evaluation/json_coverage_replay.py json
+python evaluation/plot_progress.py json
+
 # 3. Traceback analysis
 python -m evaluation.traceback_analysis ipv4
 python -m evaluation.traceback_analysis ipv6
@@ -178,6 +185,11 @@ python -m evaluation.traceback_analysis ipv6
 # 4. Evaluation graphs
 python evaluation/plot_progress.py ipv4
 ```
+
+For future `python main.py json ...` runs, the JSON replay step is triggered
+automatically at the end of the campaign when `coverage` is installed in the
+same WSL virtual environment. The manual `evaluation/json_coverage_replay.py`
+command is mainly for backfilling older `results/json/` runs.
 
 ## Example 3-Hour Hybrid DL Runs
 

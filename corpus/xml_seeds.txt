@@ -1,0 +1,12 @@
+<root/>
+<root></root>
+<root><child/></root>
+<root><child>text</child></root>
+<root attr="value"/>
+<root a="1" b="two"/>
+<root><a/><b/><c/></root>
+<root><item id="1">x</item><item id="2">y</item></root>
+<root><!--comment--><child/></root>
+<root><![CDATA[some <unsafe> text]]></root>
+<?xml version="1.0"?><root/>
+<ns:root xmlns:ns="urn:test"><ns:item/></ns:root>

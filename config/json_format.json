@@ -16,6 +16,10 @@
   ],
   "semantic_rules": [
     "literal_swap",
+    "escape_injection",
+    "unicode_escape_damage",
+    "nesting_wrap",
+    "number_stress",
     "quote_damage",
     "comma_damage",
     "colon_damage",
