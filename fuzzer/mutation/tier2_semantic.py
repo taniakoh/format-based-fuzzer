@@ -2282,11 +2282,17 @@ class CidrizeSemanticMutator(SemanticMutator):
         "token_duplication",
         "whitespace_injection",
     ]
-    VALID_FOCUSED_OPS = [
-        "address_boundary",
-        "replace_with_valid_example",
-        "wildcard_expand",
-        "hostname_tld_edge",
+    PARSER_ERROR_FOCUSED_OPS = [
+        "cidr_missing_prefix",
+        "separator_repeat",
+        "stacked_prefix",
+        "wildcard_repeat",
+        "range_boundary_drop",
+        "adjacent_mask",
+        "wildcard_damage",
+        "separator_confusion",
+        "token_duplication",
+        "whitespace_injection",
     ]
 
     _IPV4_TOKEN_RE = re.compile(r"\d+(?:\.\d+){3}")
@@ -2335,7 +2341,9 @@ class CidrizeSemanticMutator(SemanticMutator):
         op = self._oracle_guided_operation(
             "cidrize",
             data,
-            preferred_ops=self.VALID_FOCUSED_OPS,
+            preferred_ops=self.PARSER_ERROR_FOCUSED_OPS,
+            valid_bias=0.90,
+            repair_bias=0.90,
         )
         try:
             mutated, field = getattr(self, f"_{op}")(
@@ -2424,16 +2432,16 @@ class CidrizeSemanticMutator(SemanticMutator):
         preferred_fields: list[str] | None = None,
     ) -> tuple[bytes, str]:  # noqa: ARG002
         example = random.choice([
-            "192.0.2.33",
-            "2001:db8::1",
-            "192.0.2.0/24",
-            "2001:db8::/64",
-            "192.0.2.80-192.0.2.85",
-            "192.0.2.170-175",
-            "192.0.2.[5678]",
-            "edge.ai",
-            "alpha.museum",
-            "svc.example.dev",
+            "192.0.2.170--175",
+            "192.0.2.170---175",
+            "192.0.2.64/24/25",
+            "192.0.2.**",
+            "192.0.2.-192.0.2.85",
+            "192.0.2.0 255.255.255.0",
+            "192.0.2.[",
+            "192.0.2.[5-]",
+            "192.0.2.8[0-5][",
+            "192.0.2.33 192.0.2.33",
         ])
         return example.encode(), "address"
 

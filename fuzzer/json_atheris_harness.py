@@ -46,10 +46,11 @@ LOGS_DIR = ROOT / "results" / "json" / "logs"
 BUG_COUNTS_CSV = LOGS_DIR / "bug_counts.csv"
 _INTERNAL_TIMEOUT_SECS = 11
 
-# In-memory dedup set so we only write new unique bugs to the CSV.
+# In-memory dedup set so we only save new reproducer artifacts.
 _seen_crash_hashes: set[str] = set()
 # Record one invalidity artifact per distinct parser rejection site and message.
 _seen_invalidity_sites: set[tuple[str, str, int]] = set()
+_bug_count_rows: dict[tuple[str, str, str, int | str], dict[str, object]] = {}
 
 # Byte patterns that repeatedly trigger the known infinite-loop bug.
 # We only skip them after the harness has already recorded the bug.
@@ -71,14 +72,54 @@ def _write_bug_counts_csv(
     exc_type: str = "",
     lineno: int | str = "",
 ) -> None:
-    """Append one entry to logs/bug_counts.csv, matching the ipv4/ipv6 binary format."""
+    """Rewrite logs/bug_counts.csv as a consolidated unique-bug summary."""
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    write_header = not BUG_COUNTS_CSV.exists()
-    with open(BUG_COUNTS_CSV, "a", newline="", encoding="utf-8") as f:
+    normalized_lineno: int | str = ""
+    if lineno not in ("", None):
+        try:
+            normalized_lineno = int(lineno)
+        except (TypeError, ValueError):
+            normalized_lineno = str(lineno)
+
+    row_key = (bug_type, str(exc_type or ""), str(filename or ""), normalized_lineno)
+    row = _bug_count_rows.get(row_key)
+    if row is None:
+        row = {
+            "bug_type": bug_type,
+            "exc_type": str(exc_type or ""),
+            "exc_message": exc_message,
+            "filename": str(filename or ""),
+            "lineno": normalized_lineno,
+            "count": 0,
+        }
+        _bug_count_rows[row_key] = row
+
+    row["count"] = int(row["count"]) + 1
+    if not row.get("exc_message") and exc_message:
+        row["exc_message"] = exc_message
+
+    ordered_rows = sorted(
+        _bug_count_rows.values(),
+        key=lambda item: (
+            str(item["bug_type"]),
+            str(item["filename"]),
+            "" if item["lineno"] == "" else f"{int(item['lineno']):09d}",
+            str(item["exc_type"]),
+            str(item["exc_message"]),
+        ),
+    )
+    with open(BUG_COUNTS_CSV, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        if write_header:
-            writer.writerow(["bug_type", "exc_type", "exc_message", "filename", "lineno", "count"])
-        writer.writerow([bug_type, exc_type, exc_message, filename, lineno, 1])
+        writer.writerow(["bug_type", "exc_type", "exc_message", "filename", "lineno", "count"])
+        for item in ordered_rows:
+            writer.writerow([
+                item["bug_type"],
+                item["exc_type"],
+                item["exc_message"],
+                item["filename"],
+                item["lineno"],
+                item["count"],
+            ])
 
 
 JSON_TARGET_ROOT = ROOT / "json-decoder-main"

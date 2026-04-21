@@ -2,6 +2,22 @@
 
 Use this file to record meaningful improvements, refactors, feature additions, performance work, and reliability upgrades.
 
+## 2026-04-22
+
+### Restore full IPv6 semantic reachability in config
+Improvements:
+- Updated `config/ipv6_format.json` so normal IPv6 campaigns can use the newer directed semantic operations for triple-colon, compressed-overflow, dangling-compression-tail, mixed-suffix, and embedded-IPv4 boundary cases.
+- Expanded the configured IPv6 valid examples with additional compressed and IPv4-embedded forms to keep the campaign anchored near parser-relevant valid neighborhoods.
+- Added a bootstrap regression check that fails if the IPv6 config drops these directed semantic operations again.
+
+Reasons:
+- The IPv6 mutator class already knew how to synthesize several parser-specific bug shapes, but the live config was still restricting campaigns to an older subset of operations.
+- That config drift made runs overproduce generic parse rejections and underexplore the narrower malformed-compression and embedded-IPv4 paths where the buggy parser has more interesting behavior.
+
+Key files changed:
+- `config/ipv6_format.json`
+- `evaluation/bootstrap_checks.py`
+
 ## 2026-04-21
 
 ### Target the remaining IPv6 triple-colon exception path
@@ -973,3 +989,18 @@ Key files changed:
 - `corpus/cidrize_seeds.txt`
 - `fuzzer/seed_generator.py`
 - `fuzzer/mutation/tier2_semantic.py`
+
+## 2026-04-22
+
+### Make setup guide portable across machines
+Improvements:
+- Rewrote the setup guide to use placeholder repo paths instead of hardcoded personal directories.
+- Added a portable default setup section, a separate optional WSL performance optimization section, and a sharing checklist for other computers.
+- Clarified which config files may require machine-specific `binary_linux` path updates.
+
+Reasons:
+- The previous guide was tied to one specific Windows username and WSL home directory, which made handoff to other users error-prone.
+- Separating required setup from optional local optimization makes first-time onboarding simpler and more reliable.
+
+Key files changed:
+- `setup.md`

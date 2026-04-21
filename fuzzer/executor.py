@@ -70,6 +70,8 @@ _WINDOWS_ARGS: dict[str, list[str]] = {}
 _LINUX_ARGS: dict[str, list[str]] = {}
 _INPUT_ARGS: dict[str, str] = {}
 _INPUT_ENCODINGS: dict[str, str] = {}
+_WINDOWS_TIMEOUTS: dict[str, int] = {}
+_LINUX_TIMEOUTS: dict[str, int] = {}
 
 _IS_LINUX = sys.platform != "win32"
 _FRIDA_MODULE: Any | None = None
@@ -336,6 +338,8 @@ def register_binary(
     linux_args: list[str] | None = None,
     input_arg: str | None = None,
     input_encoding: str | None = None,
+    windows_timeout: int | None = None,
+    linux_timeout: int | None = None,
 ) -> None:
     if windows is not None:
         _WINDOWS_BINARIES[target.lower()] = Path(windows)
@@ -349,6 +353,10 @@ def register_binary(
         _INPUT_ARGS[target.lower()] = input_arg
     if input_encoding is not None:
         _INPUT_ENCODINGS[target.lower()] = input_encoding
+    if windows_timeout is not None:
+        _WINDOWS_TIMEOUTS[target.lower()] = int(windows_timeout)
+    if linux_timeout is not None:
+        _LINUX_TIMEOUTS[target.lower()] = int(linux_timeout)
 
 
 def _load_frida() -> Any:
@@ -809,21 +817,21 @@ class Executor:
         if use_persistent:
             self.binary = linux_bin or persistent_root
             self._fixed_args = list(_LINUX_ARGS.get(target, []))
-            self.timeout = timeout_seconds or TIMEOUT_SECONDS_LINUX
+            self.timeout = timeout_seconds or _LINUX_TIMEOUTS.get(target, TIMEOUT_SECONDS_LINUX)
             self._mode = "Persistent"
         elif use_frida:
             _load_frida()
             self.binary = linux_bin
             self._fixed_args = list(_LINUX_ARGS.get(target, []))
             _ensure_executable(linux_bin)
-            self.timeout = timeout_seconds or TIMEOUT_SECONDS_LINUX
+            self.timeout = timeout_seconds or _LINUX_TIMEOUTS.get(target, TIMEOUT_SECONDS_LINUX)
             self._mode = "Frida"
         else:
             if _IS_LINUX and linux_bin is not None and linux_bin.exists():
                 self.binary = linux_bin
                 self._fixed_args = list(_LINUX_ARGS.get(target, []))
                 _ensure_executable(linux_bin)
-                self.timeout = timeout_seconds or TIMEOUT_SECONDS_LINUX
+                self.timeout = timeout_seconds or _LINUX_TIMEOUTS.get(target, TIMEOUT_SECONDS_LINUX)
                 self._mode = "Linux"
             else:
                 if win_bin is None or not win_bin.exists():
@@ -832,7 +840,7 @@ class Executor:
                     )
                 self.binary = win_bin
                 self._fixed_args = list(_WINDOWS_ARGS.get(target, []))
-                self.timeout = timeout_seconds or TIMEOUT_SECONDS_WIN
+                self.timeout = timeout_seconds or _WINDOWS_TIMEOUTS.get(target, TIMEOUT_SECONDS_WIN)
                 self._mode = "Windows"
 
         if str(self.binary).endswith(".py"):
@@ -1273,12 +1281,10 @@ class Executor:
         result.oracle = verdict
         parser_type = result.parser_reported_bug_type
         if parser_type:
+            # When the wrapped parser emits its own bug classification, keep
+            # that classification authoritative and use the oracle only as
+            # auxiliary metadata for downstream analysis.
             result.bug_type = str(parser_type)
-            if verdict.supported:
-                if parser_type == BugType.INVALIDITY and verdict.expected_valid is True:
-                    result.bug_type = BugType.VALIDITY
-                elif parser_type == BugType.VALIDITY and verdict.expected_valid is False:
-                    result.bug_type = BugType.INVALIDITY
             result.exception_msg = (
                 result.parser_reported_message
                 or result.exception_msg

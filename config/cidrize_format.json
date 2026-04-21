@@ -35,11 +35,8 @@
     "wildcard_repeat",
     "range_boundary_drop",
     "adjacent_mask",
-    "wildcard_expand",
     "wildcard_damage",
     "separator_confusion",
-    "hostname_tld_edge",
-    "family_mix",
     "token_duplication",
     "whitespace_injection"
   ],
@@ -55,5 +52,6 @@
   "binary_windows": "cidrize-runner-main/bin/win-cidrize-runner.exe",
   "binary_linux": "cidrize-runner-main/bin/linux-cidrize-runner",
   "binary_windows_args": ["--func", "cidrize"],
-  "binary_linux_args": ["--func", "cidrize"]
+  "binary_linux_args": ["--func", "cidrize"],
+  "binary_linux_timeout_seconds": 90
 }

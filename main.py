@@ -1311,6 +1311,8 @@ def fuzz(
             linux_args=fmt.get("binary_linux_args"),
             input_arg=fmt.get("binary_input_arg"),
             input_encoding=fmt.get("binary_input_encoding"),
+            windows_timeout=fmt.get("binary_windows_timeout_seconds"),
+            linux_timeout=fmt.get("binary_linux_timeout_seconds"),
         )
 
     phase_clock = time.perf_counter()

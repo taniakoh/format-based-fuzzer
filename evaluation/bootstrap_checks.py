@@ -6,6 +6,7 @@ Run with:
 
 from __future__ import annotations
 
+import json
 import random
 import sys
 import tempfile
@@ -103,6 +104,21 @@ def _run_ipv6_seed_and_mutator_checks() -> None:
     assert "::ffff:192.168.0.1" in seeds, seeds[:20]
     assert "1:2:3:4:5:6:7::8" in seeds, seeds[:20]
     assert any(":::" in seed and seed.count(":") >= 8 for seed in seeds), seeds[:30]
+
+    ipv6_config = json.loads((_HERE / "config" / "ipv6_format.json").read_text(encoding="utf-8"))
+    configured_ops = set(ipv6_config.get("semantic_rules", []))
+    expected_ops = {
+        "replace_with_valid_example",
+        "embedded_ipv4_boundary",
+        "triple_colon",
+        "triple_colon_full_width",
+        "compressed_overflow",
+        "dangling_compression_tail",
+        "invalid_mixed_suffix",
+        "whitespace_injection",
+    }
+    missing_ops = expected_ops - configured_ops
+    assert not missing_ops, f"ipv6 semantic_rules missing directed ops: {sorted(missing_ops)}"
 
     mutator = IPv6SemanticMutator(operations=["compressed_valid_form"])
 

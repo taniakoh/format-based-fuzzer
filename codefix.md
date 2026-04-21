@@ -20,6 +20,93 @@ Key files changed:
 
 ## 2026-04-21
 
+### Bias cidrize mutations toward parser rejection paths
+Improvements:
+- Retuned the `cidrize` semantic mutator so oracle-guided operation selection now prefers parser-error-oriented malformed families instead of valid-shape recovery operations.
+- Expanded the `cidrize` corpus with extra malformed wildcard, duplicate-token, missing-prefix, and dangling-range seeds that are more likely to trigger parser-side invalidity or bonus reports.
+- Trimmed the `cidrize` semantic rule list away from hostname/valid-shape expansion operations that were disproportionately leading to oracle mismatches.
+
+Reasons:
+- The campaign was spending too much energy inside supported-but-invalid shapes that the oracle could classify, which produced many `oracle_mismatch` results instead of parser-emitted findings.
+- Steering Tier 2 toward malformed separators, broken wildcard syntax, duplicate tokens, and incomplete CIDR/range forms gives the parser more opportunities to reject input explicitly.
+
+Key files changed:
+- fuzzer/mutation/tier2_semantic.py
+- corpus/cidrize_seeds.txt
+- config/cidrize_format.json
+- codefix.md
+
+### Give cidrize a larger Linux execution timeout
+Improvements:
+- Added per-target binary timeout registration so slow wrapper targets can override the generic Linux and Windows defaults.
+- Configured `cidrize` to use a 90-second Linux timeout instead of the shared 30-second limit.
+
+Reasons:
+- The `cidrize` Linux wrapper was repeatedly hitting the generic Frida/Linux timeout, which made runs fill up with untrusted `TIMEOUT` instrumentation noise instead of parser-driven outcomes.
+- A target-specific timeout keeps faster binaries on the old default while giving slow wrapper processes enough time to finish.
+
+Key files changed:
+- fuzzer/executor.py
+- main.py
+- config/cidrize_format.json
+- codefix.md
+
+### Keep parser-reported bug classes authoritative
+Improvements:
+- Stopped the executor from rewriting parser-reported bug classes with oracle-based remapping when a target already emitted an explicit classification.
+- Parser output now remains the source of truth for runs such as `cidrize`, while the oracle is still attached as supplemental metadata.
+
+Reasons:
+- The wrapped parser already reports whether an input was treated as a validity, invalidity, bonus, or related parser-side finding.
+- Reclassifying those parser-emitted results through the oracle could make `cidrize` outputs look wrong relative to what the parser actually said.
+
+Key files changed:
+- fuzzer/executor.py
+- codefix.md
+
+### Add rebuild utility for consolidated bug-count CSVs
+Improvements:
+- Added `evaluation/consolidate_bug_counts.py` to rebuild a consolidated unique-bug CSV from an existing run's `logs/bug_counts.csv`.
+- Added a `--replace` mode that can preserve the original event-style CSV as `bug_counts_raw.csv` and rewrite `bug_counts.csv` in place.
+
+Reasons:
+- Existing JSON results may already be on disk with the old per-artifact bug-count CSV layout, and rerunning fuzzing just to regenerate the summary is unnecessary.
+- A standalone rebuild utility makes old runs easy to normalize for later analysis and plotting.
+
+Key files changed:
+- `evaluation/consolidate_bug_counts.py`
+
+## 2026-04-21
+
+### Consolidate JSON bug-count CSV by unique bug site
+Improvements:
+- Changed the JSON Atheris harness to rewrite `results/json/logs/bug_counts.csv` as an aggregated summary keyed by bug type, exception type, filename, and line number instead of appending one `count=1` row per saved artifact.
+- Kept a representative exception message while incrementing the count for repeated sightings of the same JSON bug site.
+
+Reasons:
+- The JSON target's `bug_counts.csv` was behaving like an event log, which made repeated hits of the same bug site look like separate unique bugs.
+- A consolidated CSV makes the JSON target easier to analyze and aligns it with the repository's unique-bug reporting intent.
+
+Key files changed:
+- `fuzzer/json_atheris_harness.py`
+
+## 2026-04-21
+
+### Reclassify IPv6 parse rejections
+Improvements:
+- Reclassified parser-reported `ParseException` rejects from `bonus` to `invalidity` when the oracle already confirms the IPv6 input is invalid.
+- Added a regression check covering parser-reported `bonus` parse rejections on invalid IPv6 input.
+
+Reasons:
+- The IPv6 target was surfacing ordinary parse failures as headline `bonus` bugs even when the oracle agreed the input was simply invalid.
+- This skewed IPv6 bug reporting toward one large third-party parser bucket instead of reserving headline bug counts for real target faults.
+
+Key files changed:
+- fuzzer/executor.py
+- evaluation/oracle_checks.py
+
+## 2026-04-21
+
 ### Restore extracted IPv6 bug surface for fuzzing
 Improvements:
 - Switched the extracted IPv6 persistent worker and source-level helpers back to the original `ipv6_mstv.pyc` bytecode instead of importing the strict repo-local source override.

@@ -173,7 +173,22 @@ def _run_executor_integration_checks() -> None:
         parser_reported_message="rejected all-zero shorthand",
     )
     result = Executor._apply_oracle(stub, parser_invalidity_on_valid)
-    assert result.bug_type == BugType.VALIDITY, result
+    assert result.bug_type == BugType.INVALIDITY, result
+    assert result.oracle is not None, result
+
+    stub.target = "ipv6"
+    parser_bonus_parse_reject_on_invalid = RunResult(
+        input_str="2001:db8::g",
+        bug_type=BugType.PASS,
+        exit_code=1,
+        stdout="",
+        stderr="",
+        parser_reported_bug_type=BugType.BONUS,
+        parser_reported_message="Expected hex hextet",
+        parser_reported_exc_type="ParseException",
+    )
+    result = Executor._apply_oracle(stub, parser_bonus_parse_reject_on_invalid)
+    assert result.bug_type == BugType.BONUS, result
     assert result.oracle is not None, result
 
     timeout_bitmap = _result_to_bitmap(
