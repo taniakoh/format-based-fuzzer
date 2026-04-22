@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS_DIR = ROOT / "results"
 SERIES = (
-    ("coverage_percent", "#1d4ed8", "Coverage"),
+    ("coverage_units_percent", "#1d4ed8", "Coverage"),
     ("unique_bugs", "#b91c1c", "Unique bugs"),
     ("corpus_size", "#047857", "Corpus size"),
     ("unique_crashes", "#7c3aed", "Unique crashes"),
@@ -83,8 +83,18 @@ def load_rows(plot_path: Path) -> list[dict[str, float]]:
         reader = csv.DictReader(f)
         for row in reader:
             parsed = {key: float(value) for key, value in row.items()}
-            if "coverage_seen" not in parsed and "behaviors_seen" in parsed:
-                parsed["coverage_seen"] = parsed["behaviors_seen"]
+            if "coverage_units_seen" not in parsed:
+                if "coverage_seen" in parsed:
+                    parsed["coverage_units_seen"] = parsed["coverage_seen"]
+                elif "behaviors_seen" in parsed:
+                    parsed["coverage_units_seen"] = parsed["behaviors_seen"]
+            if "coverage_units_percent" not in parsed:
+                if "coverage_percent" in parsed:
+                    parsed["coverage_units_percent"] = parsed["coverage_percent"]
+                elif "coverage_slot_percent" in parsed:
+                    parsed["coverage_units_percent"] = parsed["coverage_slot_percent"]
+                elif "line_coverage_percent" in parsed:
+                    parsed["coverage_units_percent"] = parsed["line_coverage_percent"]
             # interesting_test_cases falls back to corpus_size (ISTD graphs)
             if "interesting_test_cases" not in parsed:
                 parsed["interesting_test_cases"] = parsed.get("corpus_size", 0.0)
@@ -101,8 +111,8 @@ def load_rows(plot_path: Path) -> list[dict[str, float]]:
 def add_bitmap_coverage_percent(rows: list[dict[str, float]]) -> list[dict[str, float]]:
     """Add percentage-of-bitmap coverage for fixed-size bitmap targets."""
     for row in rows:
-        coverage = float(row.get("coverage_seen", 0.0))
-        row["coverage_percent"] = (coverage / 65536.0) * 100.0
+        coverage = float(row.get("coverage_units_seen", 0.0))
+        row.setdefault("coverage_units_percent", (coverage / 65536.0) * 100.0)
     return rows
 
 
@@ -116,10 +126,10 @@ def add_atheris_coverage_percent(rows: list[dict[str, float]]) -> list[dict[str,
     if not rows:
         return rows
 
-    final_cov = max(float(rows[-1].get("coverage_seen", 0.0)), 1.0)
+    final_cov = max(float(rows[-1].get("coverage_units_seen", 0.0)), 1.0)
     for row in rows:
-        coverage = float(row.get("coverage_seen", 0.0))
-        row["coverage_percent"] = (coverage / final_cov) * 100.0
+        coverage = float(row.get("coverage_units_seen", 0.0))
+        row["coverage_units_percent"] = (coverage / final_cov) * 100.0
     return rows
 
 
@@ -142,7 +152,9 @@ def apply_atheris_replay_coverage(
     checkpoints = sorted(
         (
             int(entry.get("corpus_size", 0)),
-            float(entry.get("percent_covered", 0.0)),
+            float(entry.get("lines_hit", 0.0)),
+            float(entry.get("lines_total", 0.0)),
+            float(entry.get("line_coverage_percent", 0.0)),
         )
         for entry in coverage_payload.get("rows", [])
         if int(entry.get("corpus_size", 0)) > 0
@@ -151,13 +163,21 @@ def apply_atheris_replay_coverage(
         return add_atheris_coverage_percent(rows)
 
     checkpoint_idx = 0
-    current_percent = checkpoints[0][1]
+    current_lines_hit = checkpoints[0][1]
+    current_lines_total = checkpoints[0][2]
+    current_percent = checkpoints[0][3]
     for row in rows:
         corpus_size = int(row.get("corpus_size", 0))
         while checkpoint_idx + 1 < len(checkpoints) and checkpoints[checkpoint_idx + 1][0] <= corpus_size:
             checkpoint_idx += 1
-            current_percent = checkpoints[checkpoint_idx][1]
-        row["coverage_percent"] = current_percent
+            current_lines_hit = checkpoints[checkpoint_idx][1]
+            current_lines_total = checkpoints[checkpoint_idx][2]
+            current_percent = checkpoints[checkpoint_idx][3]
+        row["coverage_units_seen"] = current_lines_hit
+        row["coverage_units_percent"] = current_percent
+        row["lines_hit"] = current_lines_hit
+        row["lines_total"] = current_lines_total
+        row["line_coverage_percent"] = current_percent
     return rows
 
 
@@ -212,7 +232,7 @@ def load_atheris_rows(results_dir: Path) -> list[dict[str, float]]:
             rows.append({
                 "relative_time_sec": rel_time,
                 "total_execs": float(execs),
-                "coverage_seen": float(cov),
+                "coverage_units_seen": float(cov),
                 "corpus_size": float(corp),
                 "interesting_test_cases": float(corp),
                 "unique_bugs": float(unique_bugs),
@@ -387,8 +407,8 @@ def apply_bug_curve_to_rows(results_dir: Path, rows: list[dict[str, float]]) -> 
             {
                 "relative_time_sec": t,
                 "total_execs": float(point.get("first_seen_exec", 0.0)),
-                "coverage_seen": 0.0,
-                "coverage_percent": 0.0,
+                "coverage_units_seen": 0.0,
+                "coverage_units_percent": 0.0,
                 "interesting_test_cases": 0.0,
                 "corpus_size": 0.0,
                 "unique_bugs": float(point["unique_bugs"]),
@@ -568,8 +588,8 @@ def render_svg(
         col_idx = index % 2
         x0 = panel_left + col_idx * (panel_width + panel_gap_x)
         y0 = panel_top + row_idx * (panel_height + panel_gap_y)
-        panel_label = coverage_label if key == "coverage_percent" else label
-        if key == "coverage_percent":
+        panel_label = coverage_label if key == "coverage_units_percent" else label
+        if key == "coverage_units_percent":
             panel_note = coverage_note
         elif key == "unique_bugs":
             panel_note = bug_note
@@ -780,23 +800,23 @@ def main() -> None:
         replay_payload = load_atheris_replay_coverage(results_dir)
         replay_final = replay_payload.get("final", {}) if replay_payload else {}
         if replay_final:
-            coverage_label = "Coverage (% of buggy_json source)"
-            final_pct = float(replay_final.get("percent_covered", 0.0))
-            covered_items = int(replay_final.get("covered_items", 0))
-            total_items = int(replay_final.get("total_items", 0))
-            coverage_note = f"Final: {final_pct:.2f}% ({covered_items}/{total_items} lines+branches)"
+            coverage_label = "Line coverage (% of buggy_json source)"
+            final_pct = float(replay_final.get("line_coverage_percent", 0.0))
+            lines_hit = int(replay_final.get("lines_hit", 0))
+            lines_total = int(replay_final.get("lines_total", 0))
+            coverage_note = f"Final: {final_pct:.2f}% ({lines_hit}/{lines_total} lines)"
         else:
-            coverage_label = "Coverage (% of final observed cov)"
-            final_cov = int(rows[-1]["coverage_seen"]) if rows else 0
+            coverage_label = "Coverage units (% of final observed cov)"
+            final_cov = int(rows[-1]["coverage_units_seen"]) if rows else 0
             coverage_note = f"Final: 100.0% ({final_cov} cov)"
     else:
         plot_path, output_path = resolve_paths(args.target_or_plot_data, args.output)
         rows = load_rows(plot_path)
         title = f"Fuzzer Progress: {plot_path.parent.name}"
         results_dir = plot_path.parent
-        coverage_label = "Coverage (% of 65536-slot bitmap)"
-        final_cov = rows[-1]["coverage_seen"] if rows else 0.0
-        final_pct = rows[-1]["coverage_percent"] if rows else 0.0
+        coverage_label = "Coverage units (% of 65536-slot bitmap)"
+        final_cov = rows[-1]["coverage_units_seen"] if rows else 0.0
+        final_pct = rows[-1]["coverage_units_percent"] if rows else 0.0
         coverage_note = f"Final: {final_pct:.3f}% ({int(final_cov)} slots)"
 
     rows, bug_curve_metadata = apply_bug_curve_to_rows(results_dir, rows)

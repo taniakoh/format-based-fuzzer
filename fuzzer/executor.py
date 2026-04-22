@@ -703,6 +703,24 @@ def _traceback_exception_type(traceback_text: str) -> str:
     return match.group(1)
 
 
+def _classify_bug_type_from_traceback(traceback_text: str, exit_code: int | None) -> str | None:
+    exc_type = _traceback_exception_type(traceback_text)
+    if exc_type.endswith("PerformanceBug"):
+        return BugType.PERFORMANCE
+    if exc_type.endswith("ValidityBug"):
+        return BugType.VALIDITY
+    if exc_type.endswith("FunctionalBug"):
+        return BugType.FUNCTIONAL
+    if exc_type.endswith("ReliabilityBug"):
+        return BugType.RELIABILITY
+    if exc_type.endswith("InvalidityBug") or exc_type.endswith("ParseException"):
+        return BugType.INVALIDITY
+
+    if traceback_text:
+        return BugType.BONUS
+    return None
+
+
 def _cli_safe_input(input_data: bytes, encoding: str = "cli_escape") -> str:
     if encoding == "raw":
         return input_data.replace(b"\x00", b"").decode("latin-1", errors="replace")
@@ -1285,11 +1303,36 @@ class Executor:
     def _apply_oracle(self, result: RunResult) -> RunResult:
         verdict = evaluate_target_input(self.target, result.input_str)
         result.oracle = verdict
+
+        if result.bug_type in (BugType.CRASH, BugType.TIMEOUT):
+            return result
+
+        if result.bug_type == BugType.PERFORMANCE:
+            result.exception_msg = result.exception_msg or "PerformanceBug"
+            return result
+
+        traceback_bug_type = _classify_bug_type_from_traceback(result.traceback, result.exit_code)
+        if traceback_bug_type is not None:
+            # When the binary emits a traceback, classify from that traceback
+            # first and only keep parser-reported labels as supplemental site
+            # metadata for downstream analysis and deduplication.
+            result.bug_type = traceback_bug_type
+            exc_type = _traceback_exception_type(result.traceback)
+            if traceback_bug_type == BugType.INVALIDITY:
+                result.exception_msg = result.exception_msg or "Parser rejected input"
+            elif traceback_bug_type == BugType.BONUS:
+                result.exception_msg = (
+                    result.exception_msg
+                    or f"Parser raised {exc_type or 'an unexpected exception'}"
+                )
+            elif traceback_bug_type == BugType.PERFORMANCE:
+                result.exception_msg = result.exception_msg or "PerformanceBug"
+            return result
+
         parser_type = result.parser_reported_bug_type
         if parser_type:
-            # When the wrapped parser emits its own bug classification, keep
-            # that classification authoritative and use the oracle only as
-            # auxiliary metadata for downstream analysis.
+            # Fall back to explicit parser-reported metadata only when the
+            # binary output did not provide a traceback to classify from.
             result.bug_type = str(parser_type)
             result.exception_msg = (
                 result.parser_reported_message
@@ -1298,42 +1341,9 @@ class Executor:
             )
             return result
 
-        if result.bug_type in (BugType.CRASH, BugType.TIMEOUT):
-            return result
-
-        # Once the parser has already emitted a traceback, keep classification
-        # parser-driven instead of layering an oracle verdict onto the result.
-        observed_rejection = bool(result.traceback) or result.exit_code == 1
-        exc_type = _traceback_exception_type(result.traceback)
-        is_parse_rejection = exc_type.endswith("ParseException") or result.exit_code == 1
-
-        if result.bug_type == BugType.PERFORMANCE:
-            result.exception_msg = result.exception_msg or "PerformanceBug"
-            return result
-
-        if observed_rejection and is_parse_rejection:
-            if verdict.supported and verdict.expected_valid is True:
-                result.bug_type = BugType.VALIDITY
-            else:
-                result.bug_type = BugType.INVALIDITY
+        if result.exit_code == 1:
+            result.bug_type = BugType.INVALIDITY
             result.exception_msg = result.exception_msg or "Parser rejected input"
-            return result
-
-        if observed_rejection:
-            result.bug_type = BugType.BONUS
-            result.exception_msg = (
-                result.exception_msg
-                or f"Parser raised {exc_type or 'an unexpected exception'}"
-            )
-            return result
-
-        if verdict.supported and verdict.expected_valid is False:
-            result.bug_type = BugType.ORACLE_MISMATCH
-            result.exception_msg = "Parser accepted input the oracle expected to be invalid"
-            return result
-
-        if verdict.supported and verdict.expected_valid is True:
-            result.bug_type = BugType.PASS
             return result
 
         result.bug_type = BugType.PASS

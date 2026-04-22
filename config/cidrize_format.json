@@ -26,6 +26,7 @@
   ],
   "semantic_rules": [
     "address_boundary",
+    "scope_alias",
     "cidr_prefix",
     "cidr_missing_prefix",
     "range_flip",
@@ -37,7 +38,9 @@
     "adjacent_mask",
     "wildcard_damage",
     "separator_confusion",
+    "hostname_tld_edge",
     "token_duplication",
+    "list_separator_variation",
     "whitespace_injection"
   ],
   "havoc_operators": {
@@ -53,5 +56,5 @@
   "binary_linux": "cidrize-runner-main/bin/linux-cidrize-runner",
   "binary_windows_args": ["--func", "cidrize"],
   "binary_linux_args": ["--func", "cidrize"],
-  "binary_linux_timeout_seconds": 90
+  "binary_linux_timeout_seconds": 360
 }

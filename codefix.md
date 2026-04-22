@@ -20,6 +20,17 @@ Key files changed:
 
 ## 2026-04-21
 
+### Give IPv4 a larger Linux execution timeout
+Improvements:
+- Increased the IPv4 Linux binary timeout from the default executor budget to 90 seconds so Frida-backed runs have enough room to capture the parser's emitted outcome.
+
+Reasons:
+- The default Linux timeout was collapsing some IPv4 runs into generic `TIMEOUT` rows before the parser-side result could be observed, which made malformed-input rejects harder to distinguish from real slow paths.
+
+Key files changed:
+- config/ipv4_format.json
+- codefix.md
+
 ### Bias cidrize mutations toward parser rejection paths
 Improvements:
 - Retuned the `cidrize` semantic mutator so oracle-guided operation selection now prefers parser-error-oriented malformed families instead of valid-shape recovery operations.
@@ -814,6 +825,40 @@ Key files changed:
 
 ## 2026-04-22
 
+### Prefer binary tracebacks over parser side-channel labels
+Improvements:
+- Changed executor classification to derive `bug_type` from the emitted traceback before consulting parser-reported CSV/stdout labels.
+- Kept parser-reported bug metadata only as a fallback when no traceback is available, so dedup still has filename/line data for silent parser reports.
+- Added regression checks covering traceback-vs-parser label conflicts and the remaining no-traceback fallback path.
+
+Reasons:
+- Bug ownership is supposed to follow the binary's traceback output, but the executor was previously short-circuiting on parser side-channel labels from `bug_counts.csv`, stdout banners, or the persistent worker.
+- That made headline bug types disagree with the exception actually emitted by the target binary even though downstream dedup was already traceback-first.
+
+Key files changed:
+- `fuzzer/executor.py`
+- `evaluation/oracle_checks.py`
+- `codefix.md`
+
+## 2026-04-22
+
+### Keep parser bug labels independent from the oracle
+Improvements:
+- Stopped the executor from turning accepted inputs into `oracle_mismatch` findings or upgrading parse rejections into `validity` based on the oracle verdict.
+- Kept oracle evaluation attached as metadata only, so bug reporting and metrics now stay parser-driven unless the parser emitted its own explicit bug classification.
+- Updated the executor regression check to lock in the new parser-only classification behavior.
+
+Reasons:
+- Reported bug summaries were mixing parser findings with oracle-derived labels, which made it look like the parser itself had emitted `oracle_mismatch` bugs.
+- Keeping oracle verdicts out of `bug_type` makes the exported bug counts reflect parser behavior instead of a downstream comparison layer.
+
+Key files changed:
+- `fuzzer/executor.py`
+- `evaluation/oracle_checks.py`
+- `codefix.md`
+
+## 2026-04-22
+
 ### Stop Linux runs from falling back to Windows parser binaries
 Improvements:
 - Changed the IPv4 and IPv6 Linux target configs to use repo-relative parser paths instead of a hardcoded `/home/tanta/...` location.
@@ -828,3 +873,96 @@ Key files changed:
 - `config/ipv6_format.json`
 - `fuzzer/executor.py`
 - `codefix.md`
+## 2026-04-22
+
+### Add cidrize None literal seed
+Improvements:
+- Added the `None` literal to the cidrize seed corpus so API-misuse style inputs are present from the initial corpus.
+- Updated the cidrize seed generator to occasionally emit `None` during invalid seed generation.
+
+Reasons:
+- Preserves a null-equivalent string in the seed pool for direct-call robustness experiments without depending on mutations to synthesize it.
+- Keeps the change aligned with the target's string-based runner interface while still exercising library misuse cases.
+
+Key files changed:
+- corpus/cidrize_seeds.txt
+- fuzzer/seed_generator.py
+## 2026-04-22
+
+### Widen cidrize mutator coverage
+Improvements:
+- Enabled cidrize semantic rules that were implemented but not active in config, including hostname TLD edge exploration.
+- Added generalized cidrize mutations for scope aliases and comma-list separator variants so the fuzzer can more naturally reach parser bug families around alias parsing and list whitespace.
+
+Reasons:
+- The cidrize pipeline was leaving reachable parser families underexplored even though the mutator already had most of the needed structure awareness.
+- Keeping these as generic grammar-level transformations avoids overfitting to specific traceback strings while still improving bug reachability.
+
+Key files changed:
+- config/cidrize_format.json
+- fuzzer/mutation/tier2_semantic.py
+- evaluation/bootstrap_checks.py
+## 2026-04-22
+
+### Normalize null-like seed coverage
+Improvements:
+- Added null-like seeds to the text targets using format-native representations instead of reusing the exact same token everywhere.
+- Included cross-language `None` for JSON-family misuse coverage and XML null markers in the XML corpus.
+
+Reasons:
+- Makes the seed strategy more consistent across targets while preserving realistic per-format inputs.
+- Improves exploration of parser behavior around missing values and invalid literal handling.
+
+Key files changed:
+- fuzzer/seed_generator.py
+- corpus/xml_seeds.txt
+- evaluation/bootstrap_checks.py
+
+### Remove source-flavored cidrize aliases
+Improvements:
+- Removed natural-language cidrize scope aliases from the generalized seed and mutator strategy, keeping only standard whole-space notations.
+
+Reasons:
+- Avoids overfitting to implementation-specific phrases and keeps the cidrize corpus aligned with black-box-justifiable inputs.
+
+Key files changed:
+- fuzzer/seed_generator.py
+- fuzzer/mutation/tier2_semantic.py
+- evaluation/bootstrap_checks.py
+## 2026-04-22
+
+### Relax JSON timeout thresholds
+Improvements:
+- Increased JSON Atheris timeout settings in both the launcher and per-input harness alarm.
+- Raised the JSON coverage replay timeout to match the new slower-path allowance.
+
+Reasons:
+- Avoids classifying slower decoder paths as timeouts too early during fuzzing and replay.
+- Keeps the internal harness timeout below the outer libFuzzer timeout while widening the debugging window.
+
+Key files changed:
+- main.py
+- fuzzer/json_atheris_harness.py
+- evaluation/json_coverage_replay.py
+
+## 2026-04-22
+
+### Align unique bug metrics and coverage labels
+Improvements:
+- Unified headline `unique_bugs` counting so only parser bug families are included, while oracle-derived findings stay visible under `unique_findings`.
+- Fixed the Atheris post-processing path to keep a full finding stream in `bugs.jsonl`, deduplicate `unique_findings` by signature, and mark parser-site uniqueness as unsupported instead of silently reporting zero.
+- Replaced source-flavored coverage labels with backend-aware fields, including slot-based coverage for binary runs and line-based coverage for replay-backed JSON runs.
+- Added regression tests covering oracle-mismatch exclusion, divergence between unique findings and unique bugs, and replayed line-coverage summaries.
+
+Reasons:
+- The previous Atheris path could count `oracle_mismatch` as a unique bug even though the live collector excluded it.
+- The previous `coverage_percent` label implied source coverage even when the metric was only bitmap occupancy or Atheris coverage units.
+- Locking these rules down in tests reduces the risk of future metric drift.
+
+Key files changed:
+- evaluation/collect_metrics.py
+- main.py
+- evaluation/json_coverage_replay.py
+- evaluation/plot_progress.py
+- evaluation/report_metrics.py
+- tests/test_metrics_semantics.py

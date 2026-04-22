@@ -75,8 +75,11 @@ def load_plot_rows(run_dir: Path) -> list[dict[str, float]]:
                 if value is None or value == "":
                     continue
                 parsed[key] = float(value)
-            if "coverage_seen" not in parsed and "behaviors_seen" in parsed:
-                parsed["coverage_seen"] = parsed["behaviors_seen"]
+            if "coverage_units_seen" not in parsed:
+                if "coverage_seen" in parsed:
+                    parsed["coverage_units_seen"] = parsed["coverage_seen"]
+                elif "behaviors_seen" in parsed:
+                    parsed["coverage_units_seen"] = parsed["behaviors_seen"]
             rows.append(parsed)
     return rows
 

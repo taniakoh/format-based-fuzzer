@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parent.parent
 CRASHES_DIR = ROOT / "results" / "json" / "crashes"
 LOGS_DIR = ROOT / "results" / "json" / "logs"
 BUG_COUNTS_CSV = LOGS_DIR / "bug_counts.csv"
-_INTERNAL_TIMEOUT_SECS = 11
+_INTERNAL_TIMEOUT_SECS = 25
 
 # In-memory dedup set so we only save new reproducer artifacts.
 _seen_crash_hashes: set[str] = set()

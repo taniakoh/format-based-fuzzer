@@ -44,14 +44,15 @@ CURVE_SPECS = (
     ("rq1_unique_crashes_vs_time", "relative_time_sec", "unique_crashes"),
     ("rq1_interesting_tests_vs_time", "relative_time_sec", "interesting_test_cases"),
     ("rq1_interesting_tests_vs_execs", "total_execs", "interesting_test_cases"),
-    ("rq1_coverage_vs_time", "relative_time_sec", "coverage_percent"),
+    ("rq1_coverage_vs_time", "relative_time_sec", "coverage_units_percent"),
 )
 
 SUMMARY_METRICS = (
     "total_executions",
     "execs_per_sec",
-    "coverage_seen",
-    "coverage_percent",
+    "coverage_units_seen",
+    "coverage_units_percent",
+    "line_coverage_percent",
     "interesting_test_cases",
     "interesting_results",
     "unique_findings",
@@ -174,8 +175,9 @@ def _load_run(run_dir: Path) -> RunData:
         "execs_per_sec": _coerce_float(run_scalars.get("execs_per_sec")),
         "pass_count": _coerce_float(run_scalars.get("pass_count")),
         "pass_rate": _coerce_float(run_scalars.get("pass_rate")),
-        "coverage_seen": _coerce_float(run_scalars.get("coverage_seen")),
-        "coverage_percent": _coerce_float(run_scalars.get("coverage_percent")),
+        "coverage_units_seen": _coerce_float(run_scalars.get("coverage_units_seen", run_scalars.get("coverage_seen"))),
+        "coverage_units_percent": _coerce_float(run_scalars.get("coverage_units_percent", run_scalars.get("coverage_percent"))),
+        "line_coverage_percent": _coerce_float(run_scalars.get("line_coverage_percent")),
         "interesting_test_cases": _coerce_float(run_scalars.get("interesting_test_cases")),
         "corpus_size": _coerce_float(run_scalars.get("corpus_size")),
         "avg_generation_time_ms": _coerce_float(run_scalars.get("avg_generation_time_ms")),
@@ -188,8 +190,9 @@ def _load_run(run_dir: Path) -> RunData:
 
     if plot_rows:
         last_row = plot_rows[-1]
-        _fill_missing_stat(stats, "coverage_seen", _coerce_float(last_row.get("coverage_seen")))
-        _fill_missing_stat(stats, "coverage_percent", _coerce_float(last_row.get("coverage_percent")))
+        _fill_missing_stat(stats, "coverage_units_seen", _coerce_float(last_row.get("coverage_units_seen", last_row.get("coverage_seen"))))
+        _fill_missing_stat(stats, "coverage_units_percent", _coerce_float(last_row.get("coverage_units_percent", last_row.get("coverage_percent"))))
+        _fill_missing_stat(stats, "line_coverage_percent", _coerce_float(last_row.get("line_coverage_percent")))
         _fill_missing_stat(stats, "interesting_test_cases", _coerce_float(last_row.get("interesting_test_cases")))
         _fill_missing_stat(stats, "unique_crashes", _coerce_float(last_row.get("unique_crashes")))
         _fill_missing_stat(stats, "total_executions", _coerce_float(last_row.get("total_execs")))
@@ -415,7 +418,8 @@ def _build_report(runs: list[RunData], min_runs: int, point_count: int, output_d
                 "unique_crashes_mean": metrics["unique_crashes"]["mean"],
                 "unique_real_bugs_mean": metrics["unique_real_bugs"]["mean"],
                 "interesting_test_cases_mean": metrics["interesting_test_cases"]["mean"],
-                "coverage_percent_mean": metrics["coverage_percent"]["mean"],
+                "coverage_units_percent_mean": metrics["coverage_units_percent"]["mean"],
+                "line_coverage_percent_mean": metrics["line_coverage_percent"]["mean"],
                 "time_to_first_real_bug_mean": metrics["time_to_first_real_bug"]["mean"],
                 "avg_generation_time_ms_mean": metrics["avg_generation_time_ms"]["mean"],
                 "avg_execution_time_ms_mean": metrics["avg_execution_time_ms"]["mean"],
@@ -424,7 +428,8 @@ def _build_report(runs: list[RunData], min_runs: int, point_count: int, output_d
                 "run_count": payload["run_count"],
                 "unique_crashes_stdev": metrics["unique_crashes"]["stdev"],
                 "interesting_test_cases_stdev": metrics["interesting_test_cases"]["stdev"],
-                "coverage_percent_stdev": metrics["coverage_percent"]["stdev"],
+                "coverage_units_percent_stdev": metrics["coverage_units_percent"]["stdev"],
+                "line_coverage_percent_stdev": metrics["line_coverage_percent"]["stdev"],
             }
 
     return {
@@ -480,7 +485,8 @@ def _render_markdown(report: dict[str, object]) -> str:
                 f"- Unique crashes: {_fmt_stat_block(metrics['unique_crashes'])}",
                 f"- Unique real bugs: {_fmt_stat_block(metrics['unique_real_bugs'])}",
                 f"- Interesting test cases: {_fmt_stat_block(metrics['interesting_test_cases'])}",
-                f"- Coverage percent: {_fmt_stat_block(metrics['coverage_percent'])}",
+                f"- Coverage units percent: {_fmt_stat_block(metrics['coverage_units_percent'])}",
+                f"- Line coverage percent: {_fmt_stat_block(metrics['line_coverage_percent'])}",
                 f"- Time-to-first-real-bug (s): {_fmt_stat_block(metrics['time_to_first_real_bug'])}",
                 f"- Avg generation time (ms): {_fmt_stat_block(metrics['avg_generation_time_ms'])}",
                 f"- Avg execution time (ms): {_fmt_stat_block(metrics['avg_execution_time_ms'])}",

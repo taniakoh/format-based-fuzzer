@@ -354,7 +354,7 @@ All results are written to `results/<target>/`:
 | `unique_bugs.json` | Deduplicated bug signatures with first-seen execution, oracle context, and one example input |
 | `crashes/crash_NNNNNN.txt` | One file per crashing input |
 | `queue/id_NNNNNN.txt` | Interesting inputs re-added to the corpus, with exec number and priority |
-| `plot_data` | CSV progress samples over time (`relative_time_sec`, `total_execs`, `coverage_seen`, `coverage_percent`, `interesting_test_cases`, `corpus_size`, `unique_bugs`, `unique_crashes`) |
+| `plot_data` | CSV progress samples over time (`relative_time_sec`, `total_execs`, `coverage_units_seen`, `coverage_units_percent`, `interesting_test_cases`, `corpus_size`, `unique_bugs`, `unique_crashes`) |
 | `progress.svg` | Optional chart generated from `plot_data` with `evaluation/plot_progress.py` |
 | `fuzzer_config` | JSON snapshot of the effective run configuration |
 | `fuzzer_stats` | Duplicate of the end-of-run text summary for AFL/Neuzz-style tooling |
@@ -375,7 +375,7 @@ For the `json` and `xml` targets specifically:
 |---|---|
 | `validity` | Valid input falsely rejected by the parser - real bug |
 | `bonus` | Unexpected exception raised - real bug |
-| `oracle_mismatch` | Oracle expected rejection, but the parser accepted the input - real bug |
+| `oracle_mismatch` | Oracle expected rejection, but the parser accepted the input - visible in findings, but excluded from headline `unique_bugs` |
 | `invalidity` | Expected `ParseException` on an invalid input |
 | `oracle_unknown_accept` / `oracle_unknown_reject` | Oracle cannot classify the shape; visible in logs, not counted as headline bugs |
 | `CRASH` / `TIMEOUT` | Non-zero exit code or process exceeded the executor timeout for that mode |
@@ -398,20 +398,20 @@ python evaluation/plot_progress.py results/ipv4/plot_data --output results/ipv4/
 ```
 
 This writes an SVG dashboard with one panel per metric. Coverage is rendered as
-percentage-over-time for easier comparisons, while the raw `coverage_seen`
+percentage-over-time for easier comparisons, while the raw `coverage_units_seen`
 count remains available in `plot_data`, `stats.txt`, and
 `bug_coverage_summary.json`.
 
 Read the panels like this:
 
-- `coverage_seen`: your raw proxy coverage growth
-- `coverage_percent`: percentage of the 65,536-slot bitmap covered so far
-- `unique_bugs`: distinct saved bug signatures found so far
+- `coverage_units_seen`: the backend-specific coverage counter for that run
+- `coverage_units_percent`: the plotted percentage for that counter, either slot-based proxy coverage or replayed line coverage when available
+- `unique_bugs`: headline parser bug sites found so far
 - `corpus_size`: how many interesting seeds entered the queue
 - `unique_crashes`: distinct crash signatures, deduplicated by `(bug_type, exit_code, exception)`
 
 For demo-friendly bug inspection, open `results/<target>/unique_bugs.json`.
-It stores one entry per distinct saved bug signature along with
+It stores one entry per distinct headline bug site along with
 the first execution where it appeared and an example triggering input.
 
 ### Generating evaluation graphs

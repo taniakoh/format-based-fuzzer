@@ -122,7 +122,7 @@ def _run_executor_integration_checks() -> None:
         traceback="Traceback\nParseException: no",
     )
     result = Executor._apply_oracle(stub, rejected_valid)
-    assert result.bug_type == BugType.VALIDITY, result
+    assert result.bug_type == BugType.INVALIDITY, result
     assert result.oracle is not None, result
 
     accepted_invalid = RunResult(
@@ -133,7 +133,7 @@ def _run_executor_integration_checks() -> None:
         stderr="",
     )
     result = Executor._apply_oracle(stub, accepted_invalid)
-    assert result.bug_type == BugType.ORACLE_MISMATCH, result
+    assert result.bug_type == BugType.PASS, result
     assert result.oracle is not None, result
 
     reported_functional = RunResult(
@@ -160,7 +160,7 @@ def _run_executor_integration_checks() -> None:
         traceback="Traceback\nReliabilityBug: malformed compression",
     )
     result = Executor._apply_oracle(stub, traced_bonus)
-    assert result.bug_type == BugType.BONUS, result
+    assert result.bug_type == BugType.RELIABILITY, result
     assert result.oracle is not None, result
 
     parser_invalidity_on_valid = RunResult(
@@ -176,6 +176,36 @@ def _run_executor_integration_checks() -> None:
     assert result.bug_type == BugType.INVALIDITY, result
     assert result.oracle is not None, result
 
+    traceback_invalidity_overrides_parser_label = RunResult(
+        input_str="1.2.3.4",
+        bug_type=BugType.PASS,
+        exit_code=1,
+        stdout="",
+        stderr="",
+        exception_msg="ParseException: parser rejected valid input",
+        traceback="Traceback\nParseException: parser rejected valid input",
+        parser_reported_bug_type=BugType.VALIDITY,
+        parser_reported_message="parser said validity elsewhere",
+    )
+    result = Executor._apply_oracle(stub, traceback_invalidity_overrides_parser_label)
+    assert result.bug_type == BugType.INVALIDITY, result
+    assert result.oracle is not None, result
+
+    traceback_bonus_overrides_parser_label = RunResult(
+        input_str="2001:db8:::1",
+        bug_type=BugType.PASS,
+        exit_code=1,
+        stdout="",
+        stderr="",
+        exception_msg="ReliabilityBug: malformed compression",
+        traceback="Traceback\nReliabilityBug: malformed compression",
+        parser_reported_bug_type=BugType.INVALIDITY,
+        parser_reported_message="Expected hex hextet",
+    )
+    result = Executor._apply_oracle(stub, traceback_bonus_overrides_parser_label)
+    assert result.bug_type == BugType.RELIABILITY, result
+    assert result.oracle is not None, result
+
     stub.target = "ipv6"
     parser_bonus_parse_reject_on_invalid = RunResult(
         input_str="2001:db8::g",
@@ -188,6 +218,20 @@ def _run_executor_integration_checks() -> None:
         parser_reported_exc_type="ParseException",
     )
     result = Executor._apply_oracle(stub, parser_bonus_parse_reject_on_invalid)
+    assert result.bug_type == BugType.BONUS, result
+    assert result.oracle is not None, result
+
+    parser_label_without_traceback_still_applies = RunResult(
+        input_str="2001:db8::g",
+        bug_type=BugType.PASS,
+        exit_code=1,
+        stdout="",
+        stderr="",
+        parser_reported_bug_type=BugType.BONUS,
+        parser_reported_message="Expected hex hextet",
+        parser_reported_exc_type="ParseException",
+    )
+    result = Executor._apply_oracle(stub, parser_label_without_traceback_still_applies)
     assert result.bug_type == BugType.BONUS, result
     assert result.oracle is not None, result
 

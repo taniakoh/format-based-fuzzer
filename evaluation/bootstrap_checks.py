@@ -97,6 +97,7 @@ def _run_binary_mutator_checks() -> None:
 def _run_ipv6_seed_and_mutator_checks() -> None:
     generator = get_seed_generator("ipv6")
     seeds = [seed.decode("latin-1") for seed in generator.generate_corpus(80)]
+    assert "None" in seeds, seeds[:20]
     assert "::" in seeds, seeds[:10]
     assert "::1" in seeds, seeds[:10]
     assert any(seed.endswith("::") for seed in seeds), seeds[:20]
@@ -150,6 +151,8 @@ def _run_ipv6_seed_and_mutator_checks() -> None:
 def _run_json_seed_and_mutator_checks() -> None:
     generator = get_seed_generator("json")
     seeds = generator.generate_corpus(64)
+    assert b"null" in seeds or b'{"key":null}' in seeds or b"[null]" in seeds, seeds[:12]
+    assert b"None" in seeds, seeds[:12]
     assert any(b'"\\t"' in seed or b'"\\b"' in seed or b'"\\f"' in seed for seed in seeds), seeds[:12]
     assert any(b"\\u12345" in seed or b"\\uABCDE" in seed for seed in seeds), seeds[:12]
     assert any(seed.isdigit() and len(seed) > 4300 for seed in seeds), len(max(seeds, key=len))
@@ -184,6 +187,57 @@ def _run_json_seed_and_mutator_checks() -> None:
     assert stressed_trace.get("operation") == "number_stress", stressed_trace
 
 
+def _run_cidrize_seed_and_mutator_checks() -> None:
+    generator = get_seed_generator("cidrize")
+    seeds = [seed.decode("latin-1") for seed in generator.generate_corpus(96)]
+    assert any(seed in {"0.0.0.0/0", "::", "::/0"} for seed in seeds), seeds[:24]
+    assert any("," in seed for seed in seeds), seeds[:24]
+    assert any(", " in seed or ",\t" in seed or ",\n" in seed for seed in seeds), seeds[:24]
+    assert any(seed.endswith(".ai") or seed.endswith(".museum") or ".museum" in seed for seed in seeds), seeds[:24]
+    assert any(
+        "." in seed and len(seed.rsplit(".", 1)[1].strip()) in {1, 2, 5, 6, 7}
+        for seed in seeds
+    ), seeds[:24]
+
+    cidrize_config = json.loads((_HERE / "config" / "cidrize_format.json").read_text(encoding="utf-8"))
+    configured_ops = set(cidrize_config.get("semantic_rules", []))
+    expected_ops = {
+        "scope_alias",
+        "hostname_tld_edge",
+        "list_separator_variation",
+        "separator_repeat",
+        "stacked_prefix",
+        "wildcard_repeat",
+        "adjacent_mask",
+    }
+    missing_ops = expected_ops - configured_ops
+    assert not missing_ops, f"cidrize semantic_rules missing directed ops: {sorted(missing_ops)}"
+
+    mutator = get_mutator("cidrize", {"semantic_rules": ["scope_alias"]})
+    random.seed(59)
+    aliased = mutator.mutate(b"192.0.2.33")
+    aliased_text = aliased.decode("latin-1")
+    aliased_trace = mutator.consume_last_trace()
+    assert aliased_text in {"0.0.0.0/0", "::", "::/0"}, aliased_text
+    assert aliased_trace.get("operation") == "scope_alias", aliased_trace
+
+    mutator = get_mutator("cidrize", {"semantic_rules": ["list_separator_variation"]})
+    random.seed(61)
+    listed = mutator.mutate(b"192.0.2.33")
+    listed_text = listed.decode("latin-1")
+    listed_trace = mutator.consume_last_trace()
+    assert "," in listed_text, listed_text
+    assert listed_trace.get("operation") == "list_separator_variation", listed_trace
+
+    mutator = get_mutator("cidrize", {"semantic_rules": ["hostname_tld_edge"]})
+    random.seed(67)
+    host = mutator.mutate(b"svc.example.dev")
+    host_text = host.decode("latin-1")
+    host_trace = mutator.consume_last_trace()
+    assert "." in host_text, host_text
+    assert host_trace.get("operation") == "hostname_tld_edge", host_trace
+
+
 def _run_xml_bootstrap_and_mutator_checks() -> None:
     # Verify the saved xml_bootstrap.json loads and decodes correctly.
     profile = load_bootstrap_profile("xml")
@@ -209,6 +263,7 @@ def _run_xml_bootstrap_and_mutator_checks() -> None:
     assert corpus_seeds, "load_seed_inputs returned nothing for xml"
     assert all(isinstance(s, bytes) for s in corpus_seeds), corpus_seeds[:3]
     assert any(b"<root" in s for s in corpus_seeds), corpus_seeds[:5]
+    assert any(s in {b"None", b"<null/>"} or b'xsi:nil="true"' in s for s in corpus_seeds), corpus_seeds[:8]
 
     # Verify the XML semantic mutator runs without error on a valid seed.
     mutator = get_mutator("xml", {"semantic_rules": ["tag_rename"]})
@@ -242,6 +297,7 @@ def main() -> None:
     _run_binary_mutator_checks()
     _run_ipv6_seed_and_mutator_checks()
     _run_json_seed_and_mutator_checks()
+    _run_cidrize_seed_and_mutator_checks()
     _run_xml_bootstrap_and_mutator_checks()
     print("bootstrap checks passed")
 

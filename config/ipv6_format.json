@@ -48,5 +48,6 @@
     "delete_range":    0.10,
     "insert_random":   0.10,
     "interesting_byte": 0.20
-  }
+  },
+  "binary_linux_timeout_seconds": 360
 }

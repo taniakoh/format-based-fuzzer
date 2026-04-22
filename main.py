@@ -45,7 +45,12 @@ import traceback
 from collections import Counter, deque
 from pathlib import Path
 
-from evaluation.collect_metrics import MetricsCollector, derive_bug_site
+from evaluation.collect_metrics import (
+    MetricsCollector,
+    derive_bug_site,
+    make_finding_signature,
+    should_count_toward_unique_bugs,
+)
 from evaluation.json_coverage_replay import generate_json_atheris_replay_coverage
 from fuzzer.bootstrap import ensure_bootstrap_profile
 from fuzzer.corpus import Corpus
@@ -55,6 +60,7 @@ from fuzzer.format_loader import load_format
 from fuzzer.mutation.tier1_structure import StructureMutator
 from fuzzer.mutation.tier2_semantic import get_mutator
 from fuzzer.mutation.tier3_havoc import HavocMutator
+from fuzzer.oracle import evaluate_target_input
 from fuzzer.scheduler import FixedScheduler, StaticScheduler
 from fuzzer.seed_generator import get_seed_generator
 
@@ -104,6 +110,24 @@ def _run_dir(target: str, run_id: str) -> Path:
 def _checkpoint_key(target: str, run_id: str) -> str:
     """Return the model checkpoint key for a given target and optional run_id."""
     return f"{target}_{run_id}" if run_id else target
+
+
+def _preserve_ipv4_bug_candidate(data: bytes) -> bool:
+    """Keep valid IPv4 inputs with seeded trigger octets intact for execution."""
+    try:
+        input_str = data.decode("latin-1", errors="replace")
+    except Exception:
+        return False
+
+    verdict = evaluate_target_input("ipv4", input_str)
+    if not verdict.supported or verdict.expected_valid is not True:
+        return False
+
+    try:
+        octets = [int(part, 10) for part in input_str.split(".")]
+    except ValueError:
+        return False
+    return any(octet in (0, 254) for octet in octets)
 
 
 def _handle_remove_readonly(func, path, exc_info) -> None:
@@ -477,7 +501,7 @@ def _run_atheris_target(
         f"-artifact_prefix={str(crashes_dir)}{os.sep}",
         f"-max_total_time={time_budget_secs}",
         "-print_final_stats=1",
-        "-timeout=15",
+        "-timeout=30",
         "-ignore_timeouts=1",
     ]
     env = os.environ.copy()
@@ -582,6 +606,28 @@ def _atheris_bug_record(
         "exception": exception,
         "traceback": traceback_text,
         "exc_type": exc_type,
+    }
+
+
+def _load_replay_line_coverage(results_dir: Path) -> dict[str, float] | None:
+    coverage_path = results_dir / "coverage_replay.json"
+    if not coverage_path.exists():
+        return None
+    try:
+        payload = json.loads(coverage_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+    final = payload.get("final", {}) if isinstance(payload, dict) else {}
+    lines_hit = float(final.get("lines_hit", 0.0) or 0.0)
+    lines_total = float(final.get("lines_total", 0.0) or 0.0)
+    line_coverage_percent = float(final.get("line_coverage_percent", 0.0) or 0.0)
+    if lines_total <= 0:
+        return None
+    return {
+        "lines_hit": lines_hit,
+        "lines_total": lines_total,
+        "line_coverage_percent": line_coverage_percent,
     }
 
 
@@ -847,12 +893,13 @@ def _postprocess_atheris_results(
     unique_bugs: dict[str, dict] = {}
     unique_findings: dict[str, dict] = {}
     bug_type_counts: Counter[str] = Counter()
-    parser_site_bug_signatures: set[str] = set()
+    parser_site_bug_signatures: set[str] | None = None
     traceback_bug_signatures: set[str] = set()
     bug_count_rows: dict[str, dict[str, object]] = {}
     raw_bug_count_rows: list[dict[str, object]] = []
     artifact_classification_cache: dict[str, dict[str, object]] = {}
     reported_crash_count = 0
+    all_findings: list[dict[str, object]] = []
 
     for crash_file in crash_files:
         try:
@@ -884,6 +931,17 @@ def _postprocess_atheris_results(
             fallback_exc_type=exc_type,
         )
         site_key = str(bug_site["key"])
+        signature = make_finding_signature(
+            bug_type=bug_type,
+            exception=exc_msg,
+            exit_code=None,
+            stderr="",
+            stdout="",
+            traceback_text=tb_text,
+            bitmap=None,
+        )
+        signature_key = str(signature["key"])
+        instrumentation_noise = int(is_instrumentation_noise)
 
         entry = {
             "bug_type": bug_type,
@@ -908,18 +966,21 @@ def _postprocess_atheris_results(
                 "taxonomy_tags": [bug_type],
             },
             "bug_site": {k: v for k, v in bug_site.items() if k != "key"},
-            "signature": {
-                "bug_type": bug_type,
-                "exception": exc_msg,
-                "bitmap_digest": "",
-            },
+            "signature": {k: v for k, v in signature.items() if k != "key"},
             "site_hit_count": 1,
             "total_occurrences": 1,
+            "instrumentation_noise": bool(is_instrumentation_noise),
         }
-        unique_findings[site_key] = entry
-        if bug_type not in ("invalidity",) and not is_instrumentation_noise:
+        all_findings.append({
+            "exec": reported_crash_count,
+            **entry,
+        })
+        if signature_key not in unique_findings:
+            unique_findings[signature_key] = dict(entry)
+
+        if should_count_toward_unique_bugs(bug_type, is_instrumentation_noise=is_instrumentation_noise):
             if site_key not in unique_bugs:
-                unique_bugs[site_key] = entry
+                unique_bugs[site_key] = dict(entry)
             else:
                 updated_count = int(unique_bugs[site_key].get("site_hit_count", 1)) + 1
                 unique_bugs[site_key]["site_hit_count"] = updated_count
@@ -930,12 +991,13 @@ def _postprocess_atheris_results(
         if not is_instrumentation_noise:
             raw_bug_count_rows.append(
                 {
+                    "exec": reported_crash_count,
                     "bug_type": bug_type,
                     "exc_type": str(bug_site.get("exception_class", "") or exc_type),
                     "exc_message": exc_msg,
                     "filename": str(bug_site.get("filename", "") or ""),
                     "lineno": "" if bug_site.get("lineno", None) is None else int(bug_site["lineno"]),
-                    "instrumentation_noise": 0,
+                    "instrumentation_noise": instrumentation_noise,
                     "crash_file": crash_file.name,
                 }
             )
@@ -954,17 +1016,18 @@ def _postprocess_atheris_results(
     # bugs.jsonl
     bugs_jsonl = results_dir / "bugs.jsonl"
     with open(bugs_jsonl, "w", encoding="utf-8") as f:
-        for entry in unique_bugs.values():
+        for entry in all_findings:
             f.write(json.dumps(entry) + "\n")
 
     # unique_bugs.json
     (results_dir / "unique_bugs.json").write_text(
         json.dumps({
             "target": target,
-            "count_definition": "Real bugs deduplicated by canonical bug site using source filename and line when available, regardless of exception class. When no source location is available, dedup falls back to normalized exception fields and finally exception text.",
+            "count_definition": "Headline parser bugs only, deduplicated by canonical bug site using source filename and line when available. Oracle-derived mismatches, invalidity results, and instrumentation noise are excluded from this count. When no source location is available, dedup falls back to normalized exception fields and finally exception text.",
             "entry_count_field": "site_hit_count",
             "unique_bug_count": len(unique_bugs),
-            "parser_site_unique_bug_count": len(parser_site_bug_signatures),
+            "parser_site_unique_bug_count": None,
+            "parser_site_unique_bug_count_supported": False,
             "traceback_unique_bug_count": len(traceback_bug_signatures),
             "entries": list(unique_bugs.values()),
         }, indent=2) + "\n",
@@ -983,20 +1046,40 @@ def _postprocess_atheris_results(
 
     # bug_coverage_summary.json
     total_crashes = reported_crash_count
+    replay_line_coverage = _load_replay_line_coverage(results_dir)
+    run_scalars: dict[str, object] = {
+        "wall_time_secs": round(duration, 1),
+        "total_executions": "Atheris-managed",
+        "execs_per_sec": "Atheris-managed",
+        "corpus_size": "Atheris-managed",
+    }
+    if replay_line_coverage is not None:
+        run_scalars.update(
+            {
+                "coverage_units_kind": "source_lines",
+                "coverage_units_seen": int(replay_line_coverage["lines_hit"]),
+                "coverage_units_percent": round(replay_line_coverage["line_coverage_percent"], 6),
+                "lines_hit": int(replay_line_coverage["lines_hit"]),
+                "lines_total": int(replay_line_coverage["lines_total"]),
+                "line_coverage_percent": round(replay_line_coverage["line_coverage_percent"], 6),
+            }
+        )
+    else:
+        run_scalars.update(
+            {
+                "coverage_units_kind": "atheris_cov_units",
+                "coverage_units_seen": "Atheris-managed",
+                "coverage_units_percent": "Atheris-managed",
+            }
+        )
     (results_dir / "bug_coverage_summary.json").write_text(
         json.dumps({
             "target": target,
-            "run_scalars": {
-                "wall_time_secs": round(duration, 1),
-                "total_executions": "Atheris-managed",
-                "execs_per_sec": "Atheris-managed",
-                "coverage_seen": "Atheris-managed",
-                "corpus_size": "Atheris-managed",
-            },
+            "run_scalars": run_scalars,
             "totals": {
                 "unique_findings": len(unique_findings),
                 "unique_real_bugs": len(unique_bugs),
-                "parser_site_unique_real_bugs": len(parser_site_bug_signatures),
+                "parser_site_unique_real_bugs": None,
                 "traceback_unique_bugs": len(traceback_bug_signatures),
                 "unique_crashes": total_crashes,
             },
@@ -1071,8 +1154,8 @@ def _postprocess_atheris_results(
                 writer.writerow([
                     "relative_time_sec",
                     "total_execs",
-                    "coverage_seen",
-                    "coverage_percent",
+                    "coverage_units_seen",
+                    "coverage_units_percent",
                     "interesting_test_cases",
                     "corpus_size",
                     "unique_bugs",
@@ -1103,10 +1186,15 @@ def _postprocess_atheris_results(
         f"Target          : {target}",
         f"Wall time       : {duration:.1f}s",
         "Total execs     : Atheris-managed (see atheris.log)",
-        "Coverage seen   : Atheris-managed (see atheris.log)",
+        (
+            f"Line coverage   : {int(replay_line_coverage['lines_hit'])}/{int(replay_line_coverage['lines_total'])} "
+            f"({replay_line_coverage['line_coverage_percent']:.3f}%)"
+            if replay_line_coverage is not None
+            else "Coverage units : Atheris-managed (see atheris.log)"
+        ),
         f"Interesting results: {sum(bug_type_counts.values())}",
         f"Unique bugs     : {len(unique_bugs)}",
-        f"Parser-site uniq: {len(parser_site_bug_signatures)}",
+        "Parser-site uniq: unsupported for Atheris artifact replay",
         f"Traceback-unique: {len(traceback_bug_signatures)}",
         f"Unique crashes  : {total_crashes}",
     ]
@@ -1114,7 +1202,7 @@ def _postprocess_atheris_results(
     (results_dir / "stats.txt").write_text(stats_text, encoding="utf-8")
     (results_dir / "fuzzer_stats").write_text(stats_text, encoding="utf-8")
 
-    print(f"[*] Post-processed: {len(unique_bugs)} unique bugs, {total_crashes} crashes → results/{target}/")
+    print(f"[*] Post-processed: {len(unique_bugs)} unique bugs, {total_crashes} crashes -> results/{target}/")
 
 
 def _elapsed_ms(start_time: float) -> float:
@@ -1160,8 +1248,8 @@ def _write_plot_data_from_logs(
         writer.writerow([
             "relative_time_sec",
             "total_execs",
-            "coverage_seen",
-            "coverage_percent",
+            "coverage_units_seen",
+            "coverage_units_percent",
             "interesting_test_cases",
             "corpus_size",
             "unique_bugs",
@@ -1543,17 +1631,27 @@ def fuzz(
             # Pick a second corpus entry for true cross-seed splice.
             splice_seed = corpus.select() if len(corpus) > 1 else None
 
-            tier3 = HavocMutator(plan["weights"])
-            mutated = tier3.mutate(
-                mutated,
-                iterations=havoc_iters,
-                hot_bytes=hot_bytes,
-                preferred_indices=preferred_indices,
-                field_lookup=field_lookup,
-                guided_ratio=0.0 if no_gradient_guidance else float(plan.get("guided_ratio", 0.7)),
-                splice_seed=splice_seed,
-            )
-            havoc_trace = tier3.consume_last_trace()
+            if target == "ipv4" and _preserve_ipv4_bug_candidate(mutated):
+                havoc_trace = {
+                    "operators": [],
+                    "fields": [],
+                    "guided_iterations": 0,
+                    "random_iterations": 0,
+                    "skipped": True,
+                    "reason": "preserve_ipv4_bug_candidate",
+                }
+            else:
+                tier3 = HavocMutator(plan["weights"])
+                mutated = tier3.mutate(
+                    mutated,
+                    iterations=havoc_iters,
+                    hot_bytes=hot_bytes,
+                    preferred_indices=preferred_indices,
+                    field_lookup=field_lookup,
+                    guided_ratio=0.0 if no_gradient_guidance else float(plan.get("guided_ratio", 0.7)),
+                    splice_seed=splice_seed,
+                )
+                havoc_trace = tier3.consume_last_trace()
 
         generation_ms = _elapsed_ms(generation_clock)
         execution_clock = time.perf_counter()

@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 RESULTS_DIR = ROOT / "results"
 JSON_TARGET_ROOT = ROOT / "json-decoder-main"
-_PER_INPUT_TIMEOUT_SECS = 12
+_PER_INPUT_TIMEOUT_SECS = 25
 
 
 def _select_mode(data: bytes) -> str:
@@ -67,8 +67,12 @@ def _json_report_totals(cov) -> dict[str, float]:
     total_items = num_statements + num_branches
     covered_items = covered_lines + covered_branches
     percent_covered = (covered_items / total_items * 100.0) if total_items else 100.0
+    line_coverage_percent = (covered_lines / num_statements * 100.0) if num_statements else 100.0
 
     return {
+        "lines_hit": float(covered_lines),
+        "lines_total": float(num_statements),
+        "line_coverage_percent": line_coverage_percent,
         "num_statements": float(num_statements),
         "covered_lines": float(covered_lines),
         "num_branches": float(num_branches),
@@ -161,7 +165,7 @@ def generate_json_atheris_replay_coverage(results_dir: Path) -> Path | None:
     payload = {
         "target": results_dir.name,
         "coverage_kind": "coverage.py combined source coverage",
-        "denominator": "All statements and branches reported by coverage.py for buggy_json",
+        "denominator": "Source lines reported by coverage.py for buggy_json (branch totals retained as extra detail)",
         "corpus_order": "atheris_corpus files sorted by mtime then filename",
         "coverage_data_file": str(data_file),
         "generated_from": str(corpus_dir),

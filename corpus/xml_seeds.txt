@@ -10,3 +10,6 @@
 <root><![CDATA[some <unsafe> text]]></root>
 <?xml version="1.0"?><root/>
 <ns:root xmlns:ns="urn:test"><ns:item/></ns:root>
+None
+<null/>
+<root xsi:nil="true" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"/>

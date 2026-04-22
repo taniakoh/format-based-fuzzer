@@ -24,8 +24,8 @@ _BITMAP_COVERAGE_SLOTS = 65536
 _PLOT_DATA_FIELDS = [
     "relative_time_sec",
     "total_execs",
-    "coverage_seen",
-    "coverage_percent",
+    "coverage_units_seen",
+    "coverage_units_percent",
     "interesting_test_cases",
     "corpus_size",
     "unique_bugs",
@@ -36,6 +36,17 @@ _PLOT_DATA_FIELDS = [
     "functional_bugs",
     "bonus_bugs",
 ]
+_HEADLINE_UNIQUE_BUG_TYPES = frozenset(
+    {
+        "validity",
+        "bonus",
+        "reliability",
+        "performance",
+        "functional",
+        "CRASH",
+        "TIMEOUT",
+    }
+)
 
 
 def _first_nonempty_line(text: str) -> str:
@@ -72,6 +83,47 @@ def _bitmap_digest(bitmap: bytes | None) -> str:
 
 def _coverage_percent(coverage_seen: int) -> float:
     return (coverage_seen / float(_BITMAP_COVERAGE_SLOTS)) * 100.0
+
+
+def should_count_toward_unique_bugs(
+    bug_type: str,
+    *,
+    is_instrumentation_noise: bool = False,
+) -> bool:
+    """Return True when a finding belongs in the headline unique-bug count."""
+    if is_instrumentation_noise:
+        return False
+    return str(bug_type) in _HEADLINE_UNIQUE_BUG_TYPES
+
+
+def make_finding_signature(
+    *,
+    bug_type: str,
+    exception: str = "",
+    exit_code: int | None = None,
+    stderr: str = "",
+    stdout: str = "",
+    traceback_text: str = "",
+    bitmap: bytes | None = None,
+) -> dict[str, object]:
+    signal_name = _signal_name(exit_code)
+    output_summary = (
+        _normalize_fragment(stderr)
+        or _normalize_fragment(stdout)
+        or _normalize_fragment(traceback_text)
+    )
+    bug_site = _traceback_location(traceback_text)
+    signature = {
+        "bug_type": str(bug_type),
+        "exit_code": exit_code,
+        "signal": signal_name,
+        "exception": str(exception),
+        "output_summary": output_summary,
+        "bitmap_digest": _bitmap_digest(bitmap),
+        "bug_site": bug_site,
+    }
+    signature["key"] = json.dumps(signature, sort_keys=True)
+    return signature
 
 
 def _parse_traceback_frames(traceback_text: str) -> list[tuple[str, int]]:
@@ -200,24 +252,15 @@ def derive_bug_site(
 
 
 def _make_bug_signature(result, bitmap: bytes | None = None) -> dict[str, object]:
-    signal_name = _signal_name(result.exit_code)
-    output_summary = (
-        _normalize_fragment(result.stderr)
-        or _normalize_fragment(result.stdout)
-        or _normalize_fragment(result.traceback)
+    return make_finding_signature(
+        bug_type=str(result.bug_type),
+        exception=str(result.exception_msg),
+        exit_code=result.exit_code,
+        stderr=result.stderr,
+        stdout=result.stdout,
+        traceback_text=getattr(result, "traceback", ""),
+        bitmap=bitmap,
     )
-    bug_site = _traceback_location(getattr(result, "traceback", ""))
-    signature = {
-        "bug_type": str(result.bug_type),
-        "exit_code": result.exit_code,
-        "signal": signal_name,
-        "exception": str(result.exception_msg),
-        "output_summary": output_summary,
-        "bitmap_digest": _bitmap_digest(bitmap),
-        "bug_site": bug_site,
-    }
-    signature["key"] = json.dumps(signature, sort_keys=True)
-    return signature
 
 
 def _parser_bug_signature(result) -> str | None:
@@ -455,7 +498,10 @@ class MetricsCollector:
             },
         )
         bug_site_key = str(bug_site["key"])
-        if result.is_real_bug:
+        if should_count_toward_unique_bugs(
+            str(result.bug_type),
+            is_instrumentation_noise=bool(getattr(result, "is_instrumentation_noise", False)),
+        ):
             self._bug_signatures.add(bug_site_key)
             self.metrics.unique_bug_count = len(self._bug_signatures)
             if parser_signature_key is not None:
@@ -464,7 +510,10 @@ class MetricsCollector:
             if str(bug_site.get("dedup_source", "")) == "traceback":
                 self._traceback_signatures.add(bug_site_key)
                 self.metrics.traceback_unique_bugs = len(self._traceback_signatures)
-        if result.is_real_bug and bug_site_key not in self._unique_bug_entries:
+        if should_count_toward_unique_bugs(
+            str(result.bug_type),
+            is_instrumentation_noise=bool(getattr(result, "is_instrumentation_noise", False)),
+        ) and bug_site_key not in self._unique_bug_entries:
             self._unique_bug_entries[bug_site_key] = {
                 **self._finding_entry(result, signature, input_str, bug_site),
                 "bug_type": result.bug_type,
@@ -472,7 +521,10 @@ class MetricsCollector:
                 "total_occurrences": 1,
             }
             self._write_unique_bugs()
-        elif result.is_real_bug:
+        elif should_count_toward_unique_bugs(
+            str(result.bug_type),
+            is_instrumentation_noise=bool(getattr(result, "is_instrumentation_noise", False)),
+        ):
             updated_count = int(self._unique_bug_entries[bug_site_key].get("site_hit_count", 1)) + 1
             self._unique_bug_entries[bug_site_key]["site_hit_count"] = updated_count
             self._unique_bug_entries[bug_site_key]["total_occurrences"] = updated_count
@@ -684,7 +736,7 @@ class MetricsCollector:
         entries.sort(key=lambda item: int(item["first_seen_exec"]))
         payload = {
             "target": self.target,
-            "count_definition": "Real bugs deduplicated by canonical bug site using source filename and line when available, regardless of exception class. When no source location is available, dedup falls back to normalized exception fields and finally exception text.",
+            "count_definition": "Headline parser bugs only, deduplicated by canonical bug site using source filename and line when available. Oracle-derived mismatches, invalidity results, and instrumentation noise are excluded from this count. When no source location is available, dedup falls back to normalized exception fields and finally exception text.",
             "entry_count_field": "site_hit_count",
             "unique_bug_count": self.metrics.unique_bug_count,
             "parser_site_unique_bug_count": self.metrics.parser_site_unique_bug_count,
@@ -769,6 +821,18 @@ class MetricsCollector:
 
         wall_time = self.metrics.wall_time_secs
         total_execs = self.metrics.total_executions
+        coverage_kind = "bitmap_slots"
+        extra_scalars: dict[str, object] = {
+            "coverage_units_seen": self.metrics.behaviors_covered,
+            "coverage_units_percent": round(_coverage_percent(self.metrics.behaviors_covered), 6),
+            "coverage_units_kind": coverage_kind,
+            "coverage_slots_seen": self.metrics.behaviors_covered,
+            "coverage_slot_percent": round(_coverage_percent(self.metrics.behaviors_covered), 6),
+        }
+        if self._run_metadata.get("executor_mode") == "Frida":
+            extra_scalars["coverage_units_kind"] = "afl_novelty_slots"
+            extra_scalars["afl_novelty_slots_seen"] = self.metrics.behaviors_covered
+
         payload = {
             "target": self.target,
             "run_scalars": {
@@ -777,8 +841,6 @@ class MetricsCollector:
                 "execs_per_sec": round(total_execs / max(1.0, wall_time), 4),
                 "pass_count": self.metrics.pass_count,
                 "pass_rate": round(self.metrics.pass_count / max(1, total_execs), 4),
-                "coverage_seen": self.metrics.behaviors_covered,
-                "coverage_percent": round(_coverage_percent(self.metrics.behaviors_covered), 6),
                 "interesting_test_cases": self.metrics.interesting_test_case_count,
                 "corpus_size": self._last_corpus_size(),
                 "avg_generation_time_ms": round(
@@ -789,6 +851,7 @@ class MetricsCollector:
                     self.metrics.total_execution_time_ms / max(1, total_execs),
                     3,
                 ),
+                **extra_scalars,
             },
             "totals": {
                 "interesting_results": self.metrics.interesting_result_count,
@@ -934,6 +997,10 @@ class MetricsCollector:
         avg_generation_ms = m.total_generation_time_ms / max(1, m.total_executions)
         avg_execution_ms = m.total_execution_time_ms / max(1, m.total_executions)
         coverage_percent = _coverage_percent(m.behaviors_covered)
+        if self._run_metadata.get("executor_mode") == "Frida":
+            coverage_line = f"AFL novelty slots: {m.behaviors_covered} ({coverage_percent:.3f}% of {_BITMAP_COVERAGE_SLOTS}-slot bitmap)"
+        else:
+            coverage_line = f"Coverage slots  : {m.behaviors_covered} ({coverage_percent:.3f}% of {_BITMAP_COVERAGE_SLOTS}-slot bitmap)"
         lines = [
             f"Target          : {m.target}",
             f"Eval mode req   : {self._run_metadata.get('evaluation_mode_requested', 'N/A')}",
@@ -944,8 +1011,7 @@ class MetricsCollector:
             f"Avg gen/test    : {avg_generation_ms:.3f} ms",
             f"Avg run/test    : {avg_execution_ms:.3f} ms",
             f"Pass (clean)    : {m.pass_count} ({pass_rate:.1%})",
-            f"Coverage seen   : {m.behaviors_covered}",
-            f"Coverage percent: {coverage_percent:.3f}% of {_BITMAP_COVERAGE_SLOTS}-slot bitmap",
+            coverage_line,
             f"Interesting tests: {m.interesting_test_case_count}",
             f"Interesting results: {m.interesting_result_count}",
             f"Unique bugs     : {m.unique_bug_count}",

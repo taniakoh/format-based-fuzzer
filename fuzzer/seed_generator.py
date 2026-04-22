@@ -136,11 +136,20 @@ class IPv4SeedGenerator(SeedGenerator):
     CURATED_VALID = [
         "0.0.0.0",
         "1.2.3.4",
+        "0.1.2.3",
+        "1.0.2.3",
+        "1.2.0.3",
+        "1.2.3.0",
         "10.0.0.1",
         "10.10.10.10",
         "99.100.127.128",
         "127.0.0.1",
         "169.254.0.1",
+        "254.1.2.3",
+        "1.254.2.3",
+        "1.2.254.3",
+        "1.2.3.254",
+        "254.99.254.199",
         "172.16.0.1",
         "192.168.0.1",
         "223.255.255.254",
@@ -151,6 +160,7 @@ class IPv4SeedGenerator(SeedGenerator):
         "010.000.000.001",
     ]
     CURATED_INVALID = [
+        "None",
         "",
         "1.2.3",
         "1.2.3.4.5",
@@ -178,6 +188,7 @@ class IPv4SeedGenerator(SeedGenerator):
         ".{o}.{o}.{o}.{o}",       # leading dot
         "{o}.{o}..{o}",            # consecutive dots
         "{o},{o},{o},{o}",         # wrong separator
+        "None",                    # null-like text token
         "",                        # empty string
     ]
 
@@ -264,6 +275,7 @@ class IPv6SeedGenerator(SeedGenerator):
         "0001:0002:0003:0004:0005:0006:0007:0008",
     ]
     CURATED_INVALID = [
+        "None",
         "",
         ":1:2:3:4:5:6:7",
         "1:2:3:4:5:6:7:8:",
@@ -342,6 +354,7 @@ class IPv6SeedGenerator(SeedGenerator):
         "{g}:{g}:{g}:{g}:{g}:{g}:{g}:{g}:",      # trailing colon
         ":{g}:{g}:{g}:{g}:{g}:{g}:{g}:{g}",      # leading single colon
         "{g5}:{g}:{g}:{g}:{g}:{g}:{g}:{g}",      # 5-hex-digit group (overlong)
+        "None",                                   # null-like text token
         "{g}",                                     # single group
         "",                                        # empty string
     ]
@@ -524,12 +537,16 @@ class JSONSeedGenerator(SeedGenerator):
         b'[1, 2',                   # truncated array
         b'"\x00"',                  # null byte in string
         b"",                         # empty input
+        b"None",                     # cross-language null-like token
         b"NaN",                      # bare NaN
         b"Infinity",                 # bare Infinity
         b"\xff\xfe{}",              # BOM prefix
     ]
 
     TARGETED_VALID_SEEDS = [
+        b"null",
+        b'{"key":null}',
+        b"[null]",
         b'"\\t"',
         b'"\\b"',
         b'"\\f"',
@@ -542,6 +559,7 @@ class JSONSeedGenerator(SeedGenerator):
     ]
 
     TARGETED_INVALID_SEEDS = [
+        b"None",
         b'"\\u1"',
         b'"\\u12"',
         b'"\\u123"',
@@ -629,9 +647,15 @@ class CidrizeSeedGenerator(SeedGenerator):
     IPV6_PREFIXES = [0, 32, 48, 64, 96, 112, 128]
     HOST_LABELS = ["edge", "alpha", "svc", "mail", "node", "api", "cache", "demo"]
     HOST_TLDS = ["ai", "io", "dev", "cloud", "museum", "travel", "local"]
+    SCOPE_ALIASES = ["0.0.0.0/0", "::", "::/0"]
+    LIST_SEPARATORS = [",", ", ", ",\t", ",\n"]
+    SPACE_VARIANTS = ["", " ", "\t"]
 
     def _ipv4(self) -> str:
         return ".".join(str(random.choice(self.IPV4_OCTETS)) for _ in range(4))
+
+    def _ipv4_triplet(self) -> str:
+        return ".".join(str(random.choice(self.IPV4_OCTETS)) for _ in range(3))
 
     def _ipv6(self) -> str:
         templates = [
@@ -652,6 +676,45 @@ class CidrizeSeedGenerator(SeedGenerator):
         labels.append(suffix)
         return ".".join(labels)
 
+    def _hostname_tld(self, edge_bias: bool = False) -> str:
+        if not edge_bias:
+            return random.choice(self.HOST_TLDS)
+        alphabet = "abcdefghijklmnopqrstuvwxyz"
+        length = random.choice([1, 2, 2, 3, 4, 5, 6, 7])
+        return "".join(random.choice(alphabet) for _ in range(length))
+
+    def _partial_range(self) -> str:
+        base = self._ipv4_triplet()
+        start = random.choice([0, 1, 8, 80, 170, 200, 254])
+        end = random.choice([0, 1, 5, 15, 85, 175, 254, 255])
+        if end < start:
+            start, end = end, start
+        return f"{base}.{start}-{end}"
+
+    def _wildcard(self) -> str:
+        base = self._ipv4_triplet()
+        return random.choice([
+            f"{base}.[{random.choice(['0123', '5678', '89', '01'])}]",
+            f"{base}.{random.choice(['0', '1', '8', '9'])}[0-5]",
+        ])
+
+    def _list_separator(self) -> str:
+        return random.choice(self.LIST_SEPARATORS)
+
+    def _apply_edge_spacing(self, value: str) -> str:
+        if random.random() >= 0.35:
+            return value
+        return f"{random.choice(self.SPACE_VARIANTS)}{value}{random.choice(self.SPACE_VARIANTS)}"
+
+    def _list_member(self) -> str:
+        return random.choice([
+            self._ipv4(),
+            f"{self._ipv4()}/{random.choice(self.IPV4_PREFIXES)}",
+            f"{self._ipv4()}-{self._ipv4()}",
+            self._hostname(random.choice(["ai", "io", "dev", "museum"])),
+            self._ipv6(),
+        ])
+
     def _invalid(self) -> str:
         choice = random.choice([
             "bad_cidr_prefix",
@@ -665,6 +728,9 @@ class CidrizeSeedGenerator(SeedGenerator):
             "truncated_range_start",
             "adjacent_mask",
             "hostname_tld_edge",
+            "list_separator_variant",
+            "scope_alias",
+            "none_literal",
         ])
         if choice == "bad_cidr_prefix":
             return f"{self._ipv4()}/{random.choice([33, 64, 128, 999])}"
@@ -675,28 +741,33 @@ class CidrizeSeedGenerator(SeedGenerator):
         if choice == "bad_octet":
             return f"{random.choice([256, 300, 999])}.{self._ipv4()}"
         if choice == "missing_part":
-            return random.choice(["", "/24", "-", f"{self._ipv4()}/", f"{self._ipv4()}-"])
+            return random.choice(["", "/24", "-", f"{self._ipv4()}/", f"{self._partial_range()[:-2]}"])
         if choice == "separator_repeat":
-            base = ".".join(str(random.choice(self.IPV4_OCTETS)) for _ in range(3))
-            start = random.choice([1, 8, 80, 170, 200])
-            end = random.choice([5, 15, 85, 175, 254])
-            return f"{base}.{start}{random.choice(['--', '---'])}{end}"
+            return self._partial_range().replace("-", random.choice(["--", "---"]), 1)
         if choice == "stacked_prefix":
-            return f"{self._ipv4()}/{random.choice(self.IPV4_PREFIXES)}/{random.choice([1, 24, 64, 999])}"
+            base = random.choice([self._ipv4(), self._ipv6()])
+            prefix_pool = self.IPV4_PREFIXES if ":" not in base else self.IPV6_PREFIXES
+            return f"{base}/{random.choice(prefix_pool)}/{random.choice([1, 24, 64, 96, 999])}"
         if choice == "wildcard_repeat":
-            base = ".".join(str(random.choice(self.IPV4_OCTETS)) for _ in range(3))
-            return f"{base}.{random.choice(['**', '***'])}"
+            wildcard = self._wildcard().replace("[", "", 1).replace("]", "", 1)
+            return wildcard.replace(random.choice(["0", "1", "5", "8"]), random.choice(["**", "***"]), 1)
         if choice == "truncated_range_start":
-            return f"{'.'.join(str(random.choice(self.IPV4_OCTETS)) for _ in range(3))}.-{self._ipv4()}"
+            left, right = self._partial_range().split("-", 1)
+            return f"{left[:-1]}-{self._apply_edge_spacing(right)}"
         if choice == "adjacent_mask":
-            return f"{self._ipv4()} {random.choice(['255.255.255.0', '255.255.0.0', '255.0.255.0'])}"
+            spacer = random.choice([" ", "  ", "\t"])
+            return f"{self._ipv4()}{spacer}{random.choice(['255.255.255.0', '255.255.0.0', '255.0.255.0'])}"
         if choice == "hostname_tld_edge":
-            return random.choice([
-                self._hostname("a"),
-                self._hostname("ab"),
-                self._hostname("abcde"),
-                self._hostname("museum"),
-            ])
+            return self._apply_edge_spacing(self._hostname(self._hostname_tld(edge_bias=True)))
+        if choice == "list_separator_variant":
+            left = self._list_member()
+            right = self._list_member()
+            return f"{self._apply_edge_spacing(left)}{self._list_separator()}{self._apply_edge_spacing(right)}"
+        if choice == "scope_alias":
+            return random.choice(self.SCOPE_ALIASES)
+        if choice == "none_literal":
+            # Keep the direct-call null-equivalent string in rotation for cidrize API misuse testing.
+            return "None"
         # wrong_separator
         return self._ipv4().replace(".", random.choice([",", ":", " "]))
 
@@ -713,6 +784,8 @@ class CidrizeSeedGenerator(SeedGenerator):
             "ipv6",
             "ipv6_cidr",
             "ipv6_range",
+            "scope_alias",
+            "list_members",
         ])
         if choice == "ipv4":
             value = self._ipv4()
@@ -723,24 +796,21 @@ class CidrizeSeedGenerator(SeedGenerator):
             end = self._ipv4()
             value = f"{start}-{end}"
         elif choice == "ipv4_partial_range":
-            base = ".".join(str(random.choice(self.IPV4_OCTETS)) for _ in range(3))
-            start = random.choice([1, 8, 80, 170, 200])
-            end = random.choice([5, 15, 85, 175, 254])
-            if end < start:
-                start, end = end, start
-            value = f"{base}.{start}-{end}"
+            value = self._partial_range()
         elif choice == "ipv4_wildcard":
-            base = ".".join(str(random.choice(self.IPV4_OCTETS)) for _ in range(3))
-            value = random.choice([
-                f"{base}.[{random.choice(['0123', '5678', '89'])}]",
-                f"{base}.{random.choice(['1', '8', '9'])}[0-5]",
-            ])
+            value = self._wildcard()
         elif choice == "hostname":
-            value = self._hostname(random.choice(["ai", "io", "dev", "cloud", "museum"]))
+            value = self._hostname(self._hostname_tld(edge_bias=random.random() < 0.25))
         elif choice == "ipv6":
             value = self._ipv6()
         elif choice == "ipv6_cidr":
             value = f"{self._ipv6()}/{random.choice(self.IPV6_PREFIXES)}"
+        elif choice == "scope_alias":
+            value = random.choice(self.SCOPE_ALIASES)
+        elif choice == "list_members":
+            left = self._list_member()
+            right = self._list_member()
+            value = f"{self._apply_edge_spacing(left)}{self._list_separator()}{self._apply_edge_spacing(right)}"
         else:
             value = f"{self._ipv6()}-{self._ipv6()}"
         return value.encode()

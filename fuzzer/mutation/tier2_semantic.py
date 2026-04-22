@@ -1444,6 +1444,8 @@ class XMLSemanticMutator(SemanticMutator):
 @SemanticMutator.register("ipv4")
 class IPv4SemanticMutator(SemanticMutator):
     OPERATIONS = [
+        "inject_zero_octet",
+        "inject_254_octet",
         "octet_boundary",
         "leading_zeros",
         "neighbor_octet",
@@ -1459,6 +1461,8 @@ class IPv4SemanticMutator(SemanticMutator):
         "whitespace_injection",
     ]
     VALID_FOCUSED_OPS = [
+        "inject_zero_octet",
+        "inject_254_octet",
         "octet_boundary",
         "leading_zeros",
         "neighbor_octet",
@@ -1496,6 +1500,47 @@ class IPv4SemanticMutator(SemanticMutator):
         except Exception:
             self._last_trace = {"applied": False}
             return data
+
+    def _replace_target_octet(
+        self,
+        data: bytes,
+        replacement: str,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        parts = s.split(".")
+        if len(parts) != 4:
+            return self._replace_with_valid_example(data, hot_bytes, preferred_fields)
+        idx = self._guided_segment_index(s, ".", "octet", hot_bytes, preferred_fields)
+        parts[idx] = replacement
+        return ".".join(parts).encode(), f"octet{idx + 1}"
+
+    def _inject_zero_octet(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        return self._replace_target_octet(
+            data,
+            "0",
+            hot_bytes=hot_bytes,
+            preferred_fields=preferred_fields,
+        )
+
+    def _inject_254_octet(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        return self._replace_target_octet(
+            data,
+            "254",
+            hot_bytes=hot_bytes,
+            preferred_fields=preferred_fields,
+        )
 
     def _octet_boundary(
         self,
@@ -2265,6 +2310,7 @@ class CidrizeSemanticMutator(SemanticMutator):
     OPERATIONS = [
         "address_boundary",
         "replace_with_valid_example",
+        "scope_alias",
         "cidr_prefix",
         "cidr_missing_prefix",
         "range_flip",
@@ -2280,9 +2326,11 @@ class CidrizeSemanticMutator(SemanticMutator):
         "hostname_tld_edge",
         "family_mix",
         "token_duplication",
+        "list_separator_variation",
         "whitespace_injection",
     ]
     PARSER_ERROR_FOCUSED_OPS = [
+        "scope_alias",
         "cidr_missing_prefix",
         "separator_repeat",
         "stacked_prefix",
@@ -2292,6 +2340,7 @@ class CidrizeSemanticMutator(SemanticMutator):
         "wildcard_damage",
         "separator_confusion",
         "token_duplication",
+        "list_separator_variation",
         "whitespace_injection",
     ]
 
@@ -2305,6 +2354,8 @@ class CidrizeSemanticMutator(SemanticMutator):
     _FULL_RANGE_RE = re.compile(r"([0-9A-Fa-f:.]+)-([0-9A-Fa-f:.]+)")
     _WILDCARD_RE = re.compile(r"\[[^\]]*\]")
     _STAR_RE = re.compile(r"\*+")
+    _LIST_SEPARATOR_RE = re.compile(r",(?:[ \t\r\n]+)?")
+    _SCOPE_ALIAS_RE = re.compile(r"0\.0\.0\.0/0|::/0|::")
 
     def get_semantic_spans(self, data: bytes) -> list[SemanticSpan]:
         s = self._decode(data)
@@ -2444,6 +2495,22 @@ class CidrizeSemanticMutator(SemanticMutator):
             "192.0.2.33 192.0.2.33",
         ])
         return example.encode(), "address"
+
+    def _scope_alias(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        match = self._choose_match(s, self._SCOPE_ALIAS_RE, hot_bytes, preferred_fields, "address")
+        alias = random.choice(["0.0.0.0/0", "::", "::/0"])
+        if match is not None:
+            return self._replace_match(s, match, alias).encode(), "address"
+        target = self._choose_address_match(s, hot_bytes, preferred_fields)
+        if target is None:
+            return alias.encode(), "address"
+        return self._replace_match(s, target, alias).encode(), "address"
 
     def _cidr_prefix(
         self,
@@ -2680,8 +2747,27 @@ class CidrizeSemanticMutator(SemanticMutator):
         if match is None:
             return b"192.0.2.1,192.0.2.1", "address"
         token = match.group(0)
-        duplicate = random.choice([f"{token},{token}", f"{token} {token}", f"{token}-{token}"])
+        duplicate = random.choice(
+            [f"{token},{token}", f"{token}, {token}", f"{token} {token}", f"{token}-{token}"]
+        )
         return self._replace_match(s, match, duplicate).encode(), "address"
+
+    def _list_separator_variation(
+        self,
+        data: bytes,
+        hot_bytes: list[int] | None = None,
+        preferred_fields: list[str] | None = None,
+    ) -> tuple[bytes, str]:
+        s = self._decode(data)
+        match = self._choose_match(s, self._LIST_SEPARATOR_RE, hot_bytes, preferred_fields, "separator")
+        replacement = random.choice([",", ", ", ",\t", ",\n"])
+        if match is not None:
+            return self._replace_match(s, match, replacement).encode(), "separator"
+        token = self._choose_address_match(s, hot_bytes, preferred_fields)
+        if token is None:
+            return b"192.0.2.33, 192.0.2.34", "separator"
+        duplicated = f"{token.group(0)}{replacement}{token.group(0)}"
+        return self._replace_match(s, token, duplicated).encode(), "separator"
 
     def _whitespace_injection(
         self,

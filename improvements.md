@@ -4,6 +4,65 @@ Use this file to record meaningful improvements, refactors, feature additions, p
 
 ## 2026-04-22
 
+### Increase IPv4 seeded-bug reachability
+Improvements:
+- Added explicit IPv4 semantic mutations that inject `0` and `254` octets so the fuzzer can intentionally target the parser's known functional and performance bug paths while preserving a valid 4-octet structure.
+- Expanded the curated IPv4 seed corpus with positional `0` and `254` variants so all octet locations start with direct coverage of the seeded value-trigger conditions.
+- Taught the main fuzz loop to skip havoc for valid IPv4 candidates that already contain a seeded trigger octet, reducing last-step corruption right before execution.
+
+Reasons:
+- The previous pipeline could already generate the right octet values, but tier-3 havoc often destroyed those valid candidates before the parser reached the seeded checks.
+- Keeping targeted valid IPv4 inputs intact makes functional and performance bug paths much more reachable without broadly weakening exploration for other targets.
+
+Key files changed:
+- `fuzzer/mutation/tier2_semantic.py`
+- `fuzzer/seed_generator.py`
+- `main.py`
+- `improvements.md`
+
+## 2026-04-22
+
+### Generalize cidrize edge-shape seed generation
+Improvements:
+- Reworked the `cidrize` seed generator to build edge-adjacent ranges, wildcards, list separators, hostname suffixes, and whitespace variants from reusable shape builders instead of relying on more explicit one-off literals.
+- Expanded the generator's hostname suffix sampling and list-spacing decoration so campaigns can drift into near-boundary parser states while still looking like natural format exploration.
+- Added a bootstrap assertion that keeps generalized hostname edge coverage present in generated `cidrize` seeds.
+
+Reasons:
+- This keeps the campaign effective on known tricky `cidrize` neighborhoods without making the seed strategy look narrowly hand-tuned to a small set of current bug strings.
+- Compositional edge generation should age better as the target changes because it explores boundary classes rather than exact examples.
+
+Key files changed:
+- `fuzzer/seed_generator.py`
+- `evaluation/bootstrap_checks.py`
+- `improvements.md`
+
+## 2026-04-22
+
+### Loosen IPv6 Linux execution timeout
+Improvements:
+- Added a configured Linux timeout of 90 seconds for the `ipv6` target so slower parser paths are less likely to be cut off by the default binary timeout.
+
+Reasons:
+- Some IPv6 cases were being recorded as `TIMEOUT` before the target finished, which made it harder to tell apart true slow-path behavior from a harness limit that was tighter than this target needed.
+
+Key files changed:
+- `config/ipv6_format.json`
+
+## 2026-04-22
+
+### Loosen cidrize Linux execution timeout
+Improvements:
+- Increased the configured Linux timeout for the `cidrize` target from 90 seconds to 180 seconds.
+
+Reasons:
+- Some `cidrize` inputs were being cut off at the executor timeout before the target finished, which inflated `TIMEOUT` counts and made it harder to distinguish real slow-path behavior from an overly aggressive harness limit.
+
+Key files changed:
+- `config/cidrize_format.json`
+
+## 2026-04-22
+
 ### Restore full IPv6 semantic reachability in config
 Improvements:
 - Updated `config/ipv6_format.json` so normal IPv6 campaigns can use the newer directed semantic operations for triple-colon, compressed-overflow, dangling-compression-tail, mixed-suffix, and embedded-IPv4 boundary cases.
@@ -1004,3 +1063,63 @@ Reasons:
 
 Key files changed:
 - `setup.md`
+## 2026-04-22
+
+### Generalize cidrize edge-shape generation
+Improvements:
+- Expanded cidrize seed generation to cover named scope aliases and comma-list variants with optional whitespace, alongside existing address, range, wildcard, and hostname forms.
+- Added generalized cidrize semantic operators for scope aliases and list-separator variation, and enabled hostname TLD edge exploration in the format config.
+- Added bootstrap checks to keep these generalized cidrize generators and mutators exercised over time.
+
+Reasons:
+- Broadens parser-family coverage in a reusable way instead of depending on hand-picked bug literals.
+- Improves the odds of reaching parser edge cases involving alias parsing, list handling, and hostname boundary rules through natural mutations and seeds.
+
+Key files changed:
+- fuzzer/seed_generator.py
+- fuzzer/mutation/tier2_semantic.py
+- config/cidrize_format.json
+- evaluation/bootstrap_checks.py
+## 2026-04-22
+
+### Add generalized null-like seeds across text targets
+Improvements:
+- Added format-appropriate null-like seeds across text target generators: `None` for free-form text parsers, `null` plus `None` for JSON-family targets, and XML-shaped null markers for XML corpus seeds.
+- Extended regression checks so the null-like seed family remains present in generated corpora and loaded XML seeds.
+
+Reasons:
+- Broadens robustness coverage for absent-value and cross-language null-token handling without overfitting to one parser or one traceback.
+- Keeps each target aligned with its actual input language while still exercising common misuse patterns.
+
+Key files changed:
+- fuzzer/seed_generator.py
+- corpus/xml_seeds.txt
+- evaluation/bootstrap_checks.py
+
+### Narrow cidrize whole-space aliases
+Improvements:
+- Reduced cidrize alias-style coverage to standard whole-space network forms such as `0.0.0.0/0`, `::`, and `::/0`.
+
+Reasons:
+- Keeps the generalized cidrize exploration black-box-defensible and avoids relying on natural-language aliases that look source-guided.
+
+Key files changed:
+- fuzzer/seed_generator.py
+- fuzzer/mutation/tier2_semantic.py
+- evaluation/bootstrap_checks.py
+## 2026-04-22
+
+### Add JSON timeout replay helper
+Improvements:
+- Added a dedicated replay helper for saved JSON `timeout-*` artifacts that reports mode selection, input preview, and reference vs buggy decoder behavior.
+- Increased the JSON fuzzing and replay timeout allowances so slower bug paths have more time to manifest before being bucketed as timeouts.
+
+Reasons:
+- Makes timeout triage much easier than manually reconstructing harness behavior from raw crash files.
+- Reduces premature timeout classification for slow-path JSON bugs while keeping hard bounds in place.
+
+Key files changed:
+- evaluation/replay_json_timeout.py
+- main.py
+- fuzzer/json_atheris_harness.py
+- evaluation/json_coverage_replay.py
