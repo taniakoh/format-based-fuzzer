@@ -75,6 +75,34 @@ Key files changed:
 - fuzzer/executor.py
 - codefix.md
 
+## 2026-04-23
+
+### Import BugType for cidrize timeout cooldown handling
+Improvements:
+- Imported `BugType` into `main.py` so the cidrize-specific timeout cooldown branch can compare parser outcomes without raising a runtime `NameError`.
+
+Reasons:
+- The fuzz loop reached the first `cidrize` execution, then crashed while checking for `BugType.TIMEOUT` because only `Executor` and helper symbols were imported from `fuzzer.executor`.
+
+Key files changed:
+- main.py
+- codefix.md
+
+### Align live unique-bug counts with consolidated bug_counts.csv
+Improvements:
+- Changed `evaluation.collect_metrics.MetricsCollector` so `unique_bug_count`, `unique_bugs.json`, `stats.txt`, and plot data all use the same deduplicated non-instrumentation-noise bug-site definition as `logs/bug_counts.csv`.
+- Preserved the older restricted parser-bug subset as a separate `headline_unique_bug_count` field so downstream summaries can still distinguish the narrower headline view.
+- Added regression coverage for oracle-mismatch and invalidity cases so future metric changes do not reintroduce drift between graphs and `bug_counts.csv`.
+
+Reasons:
+- The collector previously plotted and reported only a headline subset of bug types, while `bug_counts.csv` included additional deduplicated findings such as `invalidity` and oracle-derived classes.
+- That mismatch made graphs and `stats.txt` under-report unique bugs relative to the CSV users were relying on for ground truth.
+
+Key files changed:
+- evaluation/collect_metrics.py
+- tests/test_metrics_semantics.py
+- codefix.md
+
 ### Add rebuild utility for consolidated bug-count CSVs
 Improvements:
 - Added `evaluation/consolidate_bug_counts.py` to rebuild a consolidated unique-bug CSV from an existing run's `logs/bug_counts.csv`.
@@ -929,6 +957,21 @@ Key files changed:
 - fuzzer/seed_generator.py
 - fuzzer/mutation/tier2_semantic.py
 - evaluation/bootstrap_checks.py
+
+### Reduce cidrize timeout drag
+Improvements:
+- Increased cidrize pass-through execution probability so canonical seeds reach the parser intact more often.
+- Added cidrize-specific timeout cooldown and protected whole-space/hostname bug seeds from unnecessary havoc.
+- Classified cidrize validation exceptions as `syntactic` instead of generic `bonus`.
+
+Reasons:
+- Early cidrize runs were spending too much energy on timeout-heavy mutated inputs, which obscured deterministic parser bugs.
+- Cleaner taxonomy makes it much easier to see that cidrize-specific bug families are actually being reached.
+
+Key files changed:
+- main.py
+- fuzzer/executor.py
+- corpus/cidrize_seeds.txt
 ## 2026-04-22
 
 ### Relax JSON timeout thresholds
@@ -966,3 +1009,14 @@ Key files changed:
 - evaluation/plot_progress.py
 - evaluation/report_metrics.py
 - tests/test_metrics_semantics.py
+## 2026-04-23
+
+### Add direct cidrize reachability check
+Improvements:
+- Added a small direct probe for extracted cidrize bug paths so deterministic reachability can be checked outside the fuzzing loop.
+
+Reasons:
+- Helps debug missing bug families by separating seed scheduling issues from true reachability issues.
+
+Key files changed:
+- evaluation/cidrize_bug_path_probe.py

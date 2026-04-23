@@ -297,6 +297,7 @@ class FuzzMetrics:
     behaviors_covered: int = 0
     pass_count: int = 0
     unique_bug_count: int = 0
+    headline_unique_bug_count: int = 0
     parser_site_unique_bug_count: int = 0
     traceback_unique_bugs: int = 0
     interesting_result_count: int = 0
@@ -329,6 +330,7 @@ class MetricsCollector:
         self.metrics = FuzzMetrics(target=target)
         self._start = time.time()
         self._bug_signatures: set[str] = set()
+        self._headline_bug_signatures: set[str] = set()
         self._parser_bug_signatures: set[str] = set()
         self._traceback_signatures: set[str] = set()
         self._unique_bug_entries: dict[str, dict[str, object]] = {}
@@ -498,10 +500,8 @@ class MetricsCollector:
             },
         )
         bug_site_key = str(bug_site["key"])
-        if should_count_toward_unique_bugs(
-            str(result.bug_type),
-            is_instrumentation_noise=bool(getattr(result, "is_instrumentation_noise", False)),
-        ):
+        is_instrumentation_noise = bool(getattr(result, "is_instrumentation_noise", False))
+        if not is_instrumentation_noise:
             self._bug_signatures.add(bug_site_key)
             self.metrics.unique_bug_count = len(self._bug_signatures)
             if parser_signature_key is not None:
@@ -512,8 +512,11 @@ class MetricsCollector:
                 self.metrics.traceback_unique_bugs = len(self._traceback_signatures)
         if should_count_toward_unique_bugs(
             str(result.bug_type),
-            is_instrumentation_noise=bool(getattr(result, "is_instrumentation_noise", False)),
-        ) and bug_site_key not in self._unique_bug_entries:
+            is_instrumentation_noise=is_instrumentation_noise,
+        ):
+            self._headline_bug_signatures.add(bug_site_key)
+            self.metrics.headline_unique_bug_count = len(self._headline_bug_signatures)
+        if not is_instrumentation_noise and bug_site_key not in self._unique_bug_entries:
             self._unique_bug_entries[bug_site_key] = {
                 **self._finding_entry(result, signature, input_str, bug_site),
                 "bug_type": result.bug_type,
@@ -521,10 +524,7 @@ class MetricsCollector:
                 "total_occurrences": 1,
             }
             self._write_unique_bugs()
-        elif should_count_toward_unique_bugs(
-            str(result.bug_type),
-            is_instrumentation_noise=bool(getattr(result, "is_instrumentation_noise", False)),
-        ):
+        elif not is_instrumentation_noise:
             updated_count = int(self._unique_bug_entries[bug_site_key].get("site_hit_count", 1)) + 1
             self._unique_bug_entries[bug_site_key]["site_hit_count"] = updated_count
             self._unique_bug_entries[bug_site_key]["total_occurrences"] = updated_count
@@ -644,8 +644,9 @@ class MetricsCollector:
                 f"{_coverage_percent(self.metrics.behaviors_covered):.6f}",
                 self.metrics.interesting_test_case_count,
                 corpus_size,
-                # Progress graphs should reflect the canonical real-bug count
-                # shown in stats.txt and unique_bugs.json.
+                # Progress graphs should reflect the canonical deduplicated
+                # bug-site count shown in stats.txt, unique_bugs.json, and
+                # logs/bug_counts.csv.
                 self.metrics.unique_bug_count,
                 max(0, new_unique_bugs),
                 self.metrics.unique_crashes,
@@ -736,9 +737,10 @@ class MetricsCollector:
         entries.sort(key=lambda item: int(item["first_seen_exec"]))
         payload = {
             "target": self.target,
-            "count_definition": "Headline parser bugs only, deduplicated by canonical bug site using source filename and line when available. Oracle-derived mismatches, invalidity results, and instrumentation noise are excluded from this count. When no source location is available, dedup falls back to normalized exception fields and finally exception text.",
+            "count_definition": "All non-instrumentation-noise findings, deduplicated by canonical bug site using source filename and line when available. This matches logs/bug_counts.csv. When no source location is available, dedup falls back to normalized exception fields and finally exception text.",
             "entry_count_field": "site_hit_count",
             "unique_bug_count": self.metrics.unique_bug_count,
+            "headline_unique_bug_count": self.metrics.headline_unique_bug_count,
             "parser_site_unique_bug_count": self.metrics.parser_site_unique_bug_count,
             "traceback_unique_bug_count": self.metrics.traceback_unique_bugs,
             "entries": entries,
@@ -856,7 +858,10 @@ class MetricsCollector:
             "totals": {
                 "interesting_results": self.metrics.interesting_result_count,
                 "unique_findings": len(finding_entries),
+                "unique_bugs": self.metrics.unique_bug_count,
+                "headline_unique_bugs": self.metrics.headline_unique_bug_count,
                 "unique_real_bugs": self.metrics.unique_bug_count,
+                "parser_site_unique_bugs": self.metrics.parser_site_unique_bug_count,
                 "parser_site_unique_real_bugs": self.metrics.parser_site_unique_bug_count,
                 "traceback_unique_bugs": self.metrics.traceback_unique_bugs,
                 "unique_crashes": self.metrics.unique_crashes,
@@ -1015,6 +1020,7 @@ class MetricsCollector:
             f"Interesting tests: {m.interesting_test_case_count}",
             f"Interesting results: {m.interesting_result_count}",
             f"Unique bugs     : {m.unique_bug_count}",
+            f"Headline uniq   : {m.headline_unique_bug_count}",
             f"Parser-site uniq: {m.parser_site_unique_bug_count}",
             f"Traceback-unique: {m.traceback_unique_bugs}",
             f"Validity bugs   : {m.validity_bugs}",

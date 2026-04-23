@@ -55,7 +55,7 @@ from evaluation.json_coverage_replay import generate_json_atheris_replay_coverag
 from fuzzer.bootstrap import ensure_bootstrap_profile
 from fuzzer.corpus import Corpus
 from fuzzer.coverage import CoverageAnalyzer
-from fuzzer.executor import Executor, _is_instrumentation_noise_message, register_binary
+from fuzzer.executor import BugType, Executor, _is_instrumentation_noise_message, register_binary
 from fuzzer.format_loader import load_format
 from fuzzer.mutation.tier1_structure import StructureMutator
 from fuzzer.mutation.tier2_semantic import get_mutator
@@ -1314,6 +1314,11 @@ def _json_safe_metadata(metadata: dict | None) -> dict:
     return safe
 
 
+def _preserve_cidrize_bug_candidate(data: bytes) -> bool:
+    lowered = data.strip().lower()
+    return lowered in {b"0.0.0.0/0", b"::/0"}
+
+
 def _preferred_index_map(
     spans,
     preferred_fields: list[str] | None,
@@ -1603,11 +1608,12 @@ def fuzz(
             else getattr(scheduler, "get_hot_bytes", lambda current_seed: [])(seed)
         )
 
-        # 5% of the time run the seed unmodified (all tiers skipped) so valid
-        # inputs like 255.255.255.255 reach the parser intact.
-        # Keep this low: each execution costs ~60 s so replay wastes budget.
+        # Run some seeds unmodified so deterministic parser-triggering examples
+        # survive intact. Cidrize benefits from a higher pass-through rate
+        # because bug-triggering hostname/whole-space forms are easy to mutate away.
         semantic_trace = {"applied": False}
-        pass_through = random.random() < 0.05
+        pass_through_rate = 0.12 if target == "cidrize" else 0.05
+        pass_through = random.random() < pass_through_rate
         if pass_through:
             mutated = seed
             havoc_trace = {"applied": False}
@@ -1639,6 +1645,15 @@ def fuzz(
                     "random_iterations": 0,
                     "skipped": True,
                     "reason": "preserve_ipv4_bug_candidate",
+                }
+            elif target == "cidrize" and _preserve_cidrize_bug_candidate(mutated):
+                havoc_trace = {
+                    "operators": [],
+                    "fields": [],
+                    "guided_iterations": 0,
+                    "random_iterations": 0,
+                    "skipped": True,
+                    "reason": "preserve_cidrize_bug_candidate",
                 }
             else:
                 tier3 = HavocMutator(plan["weights"])
@@ -1693,6 +1708,11 @@ def fuzz(
                 result=result,
                 bug_site_key=bug_site_key,
                 is_new=is_new,
+            )
+        if target == "cidrize" and result.bug_type == BugType.TIMEOUT:
+            feedback["cooldown_factor"] = min(
+                float(feedback.get("cooldown_factor", 1.0)),
+                0.35,
             )
         corpus.record_result(
             seed,

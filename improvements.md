@@ -1107,6 +1107,22 @@ Key files changed:
 - fuzzer/seed_generator.py
 - fuzzer/mutation/tier2_semantic.py
 - evaluation/bootstrap_checks.py
+
+### Prioritize deterministic cidrize bug seeds
+Improvements:
+- Added `0.0.0.0/0` and `::/0` to the fixed cidrize corpus and preserved canonical cidrize bug-trigger seeds from needless havoc mutation.
+- Increased the unmodified-seed execution rate for cidrize and cooled down timeout-heavy cidrize seeds faster after execution.
+- Reclassified cidrize validation exceptions such as `InvalidCidrFormatError` and `AddrFormatError` as `syntactic` instead of generic `bonus`.
+
+Reasons:
+- Helps deterministic whole-space and hostname-edge bugs survive long enough to execute intact.
+- Reduces wasted budget on repeatedly timing-out cidrize seeds while making the resulting bug reports easier to interpret.
+
+Key files changed:
+- main.py
+- fuzzer/executor.py
+- corpus/cidrize_seeds.txt
+- evaluation/bootstrap_checks.py
 ## 2026-04-22
 
 ### Add JSON timeout replay helper
@@ -1123,3 +1139,15 @@ Key files changed:
 - main.py
 - fuzzer/json_atheris_harness.py
 - evaluation/json_coverage_replay.py
+## 2026-04-23
+
+### Add cidrize bug path probe
+Improvements:
+- Added a directed cidrize probe script for canonical whole-space and deterministic bug-trigger inputs against the extracted local payload.
+
+Reasons:
+- Lets us distinguish “the bug path is unreachable here” from “the fuzzer just has not scheduled the right seed yet”.
+- Provides a fast sanity check for the whole-space performance path without spending fuzzing budget.
+
+Key files changed:
+- evaluation/cidrize_bug_path_probe.py

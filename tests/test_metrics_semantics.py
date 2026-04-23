@@ -38,7 +38,7 @@ def _result(
 
 
 class MetricsSemanticsTests(unittest.TestCase):
-    def test_live_collector_excludes_oracle_mismatch_from_unique_bugs(self) -> None:
+    def test_live_collector_counts_bug_sites_like_bug_counts_csv(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             collector = MetricsCollector("ipv4", out_dir=Path(tmp))
             collector.write_fuzzer_config({"executor_mode": "Linux"})
@@ -55,11 +55,16 @@ class MetricsSemanticsTests(unittest.TestCase):
             unique_bugs = json.loads((Path(tmp) / "unique_bugs.json").read_text(encoding="utf-8"))
             unique_findings = json.loads((Path(tmp) / "unique_findings.json").read_text(encoding="utf-8"))
             summary = json.loads((Path(tmp) / "bug_coverage_summary.json").read_text(encoding="utf-8"))
+            bug_counts = (Path(tmp) / "logs" / "bug_counts.csv").read_text(encoding="utf-8").splitlines()
 
-            self.assertEqual(unique_bugs["unique_bug_count"], 0)
+            self.assertEqual(unique_bugs["unique_bug_count"], 1)
+            self.assertEqual(unique_bugs["headline_unique_bug_count"], 0)
             self.assertEqual(unique_findings["unique_finding_count"], 1)
-            self.assertEqual(summary["totals"]["unique_real_bugs"], 0)
+            self.assertEqual(summary["totals"]["unique_bugs"], 1)
+            self.assertEqual(summary["totals"]["headline_unique_bugs"], 0)
+            self.assertEqual(summary["totals"]["unique_real_bugs"], 1)
             self.assertEqual(summary["totals"]["unique_findings"], 1)
+            self.assertEqual(len(bug_counts), 2)
 
     def test_live_collector_keeps_unique_findings_separate_from_unique_bugs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -100,9 +105,40 @@ class MetricsSemanticsTests(unittest.TestCase):
             stats_text = (Path(tmp) / "stats.txt").read_text(encoding="utf-8")
 
             self.assertEqual(unique_bugs["unique_bug_count"], 1)
+            self.assertEqual(unique_bugs["headline_unique_bug_count"], 1)
             self.assertEqual(unique_findings["unique_finding_count"], 2)
             self.assertIn("Coverage slots", stats_text)
+            self.assertIn("Headline uniq   : 1", stats_text)
             self.assertNotIn("Coverage percent:", stats_text)
+
+    def test_live_collector_counts_invalidity_in_unique_bugs_but_not_headline(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            collector = MetricsCollector("ipv4", out_dir=Path(tmp))
+            collector.write_fuzzer_config({"executor_mode": "Linux"})
+            collector.record_execution(
+                b"case",
+                _result(
+                    bug_type=BugType.INVALIDITY,
+                    exception="ParseException: rejected malformed input",
+                    traceback_text=(
+                        "Traceback (most recent call last):\n"
+                        '  File "parser.py", line 41, in run\n'
+                        "ParseException: rejected malformed input"
+                    ),
+                ),
+                b"\x02" * 8,
+            )
+            collector.finalize()
+
+            unique_bugs = json.loads((Path(tmp) / "unique_bugs.json").read_text(encoding="utf-8"))
+            summary = json.loads((Path(tmp) / "bug_coverage_summary.json").read_text(encoding="utf-8"))
+            bug_counts = (Path(tmp) / "logs" / "bug_counts.csv").read_text(encoding="utf-8").splitlines()
+
+            self.assertEqual(unique_bugs["unique_bug_count"], 1)
+            self.assertEqual(unique_bugs["headline_unique_bug_count"], 0)
+            self.assertEqual(summary["totals"]["unique_bugs"], 1)
+            self.assertEqual(summary["totals"]["headline_unique_bugs"], 0)
+            self.assertEqual(len(bug_counts), 2)
 
     def test_atheris_postprocess_uses_parser_only_unique_bug_policy_and_line_coverage(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -2706,9 +2706,9 @@ class CidrizeSemanticMutator(SemanticMutator):
         match = self._choose_match(s, self._HOSTNAME_RE, hot_bytes, preferred_fields, "hostname")
         if match is None:
             return random.choice([
-                b"edge.ai",
-                b"alpha.museum",
-                b"svc.example.dev",
+                b"example.ai",
+                b"example.museum",
+                b"example.dev",
             ]), "hostname"
         labels = match.group(0).split(".")
         if len(labels) < 2:

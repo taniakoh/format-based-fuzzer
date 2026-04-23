@@ -30,6 +30,9 @@ from __future__ import annotations
 import ast
 import csv
 import hashlib
+import importlib
+import importlib.machinery
+import importlib.util
 import json
 import os
 import re
@@ -65,6 +68,8 @@ _PERSISTENT_EXTRACTED_ROOTS: dict[str, Path] = {
     "ipv4": _HERE / "linux-ipv4-parser_extracted",
     "ipv6": _HERE / "linux-ipv6-parser_extracted",
 }
+_CIDRIZE_EXTRACTED_ROOT = _HERE / "win-cidrize-runner.exe_extracted"
+_CIDRIZE_PYZ_ROOT = _CIDRIZE_EXTRACTED_ROOT / "PYZ.pyz_extracted"
 
 _WINDOWS_ARGS: dict[str, list[str]] = {}
 _LINUX_ARGS: dict[str, list[str]] = {}
@@ -713,6 +718,8 @@ def _classify_bug_type_from_traceback(traceback_text: str, exit_code: int | None
         return BugType.FUNCTIONAL
     if exc_type.endswith("ReliabilityBug"):
         return BugType.RELIABILITY
+    if exc_type.endswith("InvalidCidrFormatError") or exc_type.endswith("AddrFormatError"):
+        return BugType.SYNTACTIC
     if exc_type.endswith("InvalidityBug") or exc_type.endswith("ParseException"):
         return BugType.INVALIDITY
 
@@ -736,6 +743,103 @@ def _summarize_process_failure(stdout: str, stderr: str, returncode: int | None)
     if returncode is None:
         return "process failed before reporting an exit code"
     return f"process exited with code {returncode}"
+
+
+def _load_pyc_module(module_name: str, pyc_path: Path):
+    loader = importlib.machinery.SourcelessFileLoader(module_name, str(pyc_path))
+    spec = importlib.util.spec_from_loader(module_name, loader)
+    if spec is None:
+        raise ImportError(f"Could not create spec for {module_name} from {pyc_path}")
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
+def _load_module_with_source_fallback(module_name: str, pyc_path: Path):
+    try:
+        return _load_pyc_module(module_name, pyc_path)
+    except ImportError as exc:
+        source_path = pyc_path.with_suffix(".py")
+        if not source_path.exists():
+            raise ImportError(
+                f"Could not import {module_name} from {pyc_path} or {source_path}"
+            ) from exc
+        spec = importlib.util.spec_from_file_location(module_name, source_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not create spec for {module_name} from {source_path}") from exc
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+
+_DIRECT_PERFORMANCE_PROBE_CACHE: dict[tuple[str, str], bool] = {}
+
+
+def _load_direct_probe(target: str):
+    target_name = target.lower()
+    if target_name == "cidrize":
+        if str(_CIDRIZE_EXTRACTED_ROOT) not in sys.path:
+            sys.path.insert(0, str(_CIDRIZE_EXTRACTED_ROOT))
+        if str(_CIDRIZE_PYZ_ROOT) not in sys.path:
+            sys.path.insert(0, str(_CIDRIZE_PYZ_ROOT))
+        module = importlib.import_module("buggy_cidrize.cidrize_stv")
+
+        def _run(input_str: str) -> None:
+            module.cidrize(input_str, raise_errors=True)
+
+        return _run
+
+    if target_name == "ipv4":
+        bundle_root = _PERSISTENT_EXTRACTED_ROOTS["ipv4"] / "PYZ.pyz_extracted"
+        if str(bundle_root) not in sys.path:
+            sys.path.append(str(bundle_root))
+        module = _load_pyc_module(
+            "buggy_ipyparse.ipv4_stv",
+            bundle_root / "buggy_ipyparse" / "ipv4_stv.pyc",
+        )
+
+        def _run(input_str: str) -> None:
+            module.IPv4.parse_string(input_str, parse_all=True)
+
+        return _run
+
+    if target_name == "ipv6":
+        bundle_root = _PERSISTENT_EXTRACTED_ROOTS["ipv6"] / "PYZ.pyz_extracted"
+        if str(bundle_root) not in sys.path:
+            sys.path.append(str(bundle_root))
+        module = _load_module_with_source_fallback(
+            "buggy_ipyparse.ipv6_mstv",
+            bundle_root / "buggy_ipyparse" / "ipv6_mstv.pyc",
+        )
+
+        def _run(input_str: str) -> None:
+            module.IPv6.parse_string(input_str, parse_all=True)
+
+        return _run
+
+    return None
+
+
+def _direct_probe_confirms_performance_bug(target: str, input_str: str) -> bool:
+    key = (target.lower(), input_str)
+    cached = _DIRECT_PERFORMANCE_PROBE_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    runner = _load_direct_probe(target)
+    if runner is None:
+        _DIRECT_PERFORMANCE_PROBE_CACHE[key] = False
+        return False
+
+    try:
+        runner(input_str)
+    except Exception as exc:  # noqa: BLE001
+        confirmed = type(exc).__name__.endswith("PerformanceBug")
+        _DIRECT_PERFORMANCE_PROBE_CACHE[key] = confirmed
+        return confirmed
+
+    _DIRECT_PERFORMANCE_PROBE_CACHE[key] = False
+    return False
 
 
 def _result_to_bitmap(result: RunResult) -> bytes:
@@ -878,15 +982,28 @@ class Executor:
     def mode(self) -> str:
         return self._mode
 
+    def _reclassify_timeout_result(self, result: RunResult) -> RunResult:
+        if result.bug_type != BugType.TIMEOUT:
+            return result
+        try:
+            if _direct_probe_confirms_performance_bug(self.target, result.input_str):
+                result.bug_type = BugType.PERFORMANCE
+                result.exception_msg = "PerformanceBug (verified via direct local probe after external timeout)"
+        except Exception:
+            return result
+        return result
+
     def run(self, input_data: bytes) -> tuple[bytes, bool, RunResult]:
         input_str = _cli_safe_input(input_data, self._input_encoding)
         if self._mode == "Persistent":
             result = self._run_persistent(input_str)
+            result = self._reclassify_timeout_result(result)
             bitmap = _result_to_bitmap(result)
             return bitmap, result.is_crash, result
         if self._mode == "Frida":
             return self._run_with_frida(input_str)
         result = self._run_binary(input_str)
+        result = self._reclassify_timeout_result(result)
         bitmap = _result_to_bitmap(result)
         return bitmap, result.is_crash, result
 
@@ -1148,6 +1265,7 @@ class Executor:
                     stderr=stderr,
                     exception_msg="Process timed out",
                 )
+                result = self._reclassify_timeout_result(result)
                 return _edge_slots_to_bitmap(edge_slots), True, result
 
             stdout = "".join(stdout_chunks)
