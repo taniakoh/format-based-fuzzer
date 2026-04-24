@@ -1,0 +1,36 @@
+{
+  "format": "JSON",
+  "instrumentation": "atheris",
+  "fields": ["root", "object", "array", "string", "literal", "comma", "colon"],
+  "valid_examples": [
+    "{}",
+    "[]",
+    "null",
+    "true",
+    "false",
+    "0",
+    "\"text\"",
+    "{\"json\":\"obj\"}",
+    "{\"__complex__\": true, \"real\": 1, \"imag\": 2}",
+    "[\"foo\", {\"bar\":[\"baz\", null, 1.0, 2]}]"
+  ],
+  "semantic_rules": [
+    "literal_swap",
+    "quote_damage",
+    "comma_damage",
+    "colon_damage",
+    "bracket_flip",
+    "duplicate_fragment",
+    "delete_fragment",
+    "whitespace_injection"
+  ],
+  "havoc_operators": {
+    "bit_flip": 0.14,
+    "byte_substitute": 0.16,
+    "arithmetic": 0.10,
+    "splice": 0.12,
+    "delete_range": 0.14,
+    "insert_random": 0.16,
+    "interesting_byte": 0.18
+  }
+}

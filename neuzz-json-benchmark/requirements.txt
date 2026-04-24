@@ -1,0 +1,4 @@
+python-afl
+coverage>=7.0.0
+numpy>=1.26.0
+tensorflow>=2.16,<2.17

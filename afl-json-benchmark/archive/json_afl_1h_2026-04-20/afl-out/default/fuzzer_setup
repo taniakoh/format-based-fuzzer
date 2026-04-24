@@ -1,0 +1,9 @@
+# environment variables:
+AFL_CUSTOM_INFO_PROGRAM=./.venv/bin/python
+AFL_CUSTOM_INFO_PROGRAM_ARGV=afl_json_harness.py
+AFL_CUSTOM_INFO_OUT=afl-out/default
+AFL_DUMB_FORKSRV=1
+AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
+AFL_SKIP_BIN_CHECK=1
+# command line:
+'afl-fuzz' '-i' 'afl_in' '-o' 'afl-out' '--' './.venv/bin/python' 'afl_json_harness.py'

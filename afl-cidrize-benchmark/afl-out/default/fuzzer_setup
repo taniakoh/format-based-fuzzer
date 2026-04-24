@@ -1,0 +1,9 @@
+# environment variables:
+AFL_CUSTOM_INFO_PROGRAM=/home/swasarya/softtestv2/format-based-fuzzer/afl-cidrize-benchmark/.venv/bin/python
+AFL_CUSTOM_INFO_PROGRAM_ARGV=/home/swasarya/softtestv2/format-based-fuzzer/afl-cidrize-benchmark/afl_cidrize_harness.py
+AFL_CUSTOM_INFO_OUT=/home/swasarya/softtestv2/format-based-fuzzer/afl-cidrize-benchmark/afl-out/default
+AFL_DUMB_FORKSRV=1
+AFL_I_DONT_CARE_ABOUT_MISSING_CRASHES=1
+AFL_SKIP_BIN_CHECK=1
+# command line:
+'afl-fuzz' '-i' '/home/swasarya/softtestv2/format-based-fuzzer/afl-cidrize-benchmark/afl_in' '-o' '/home/swasarya/softtestv2/format-based-fuzzer/afl-cidrize-benchmark/afl-out' '--' '/home/swasarya/softtestv2/format-based-fuzzer/afl-cidrize-benchmark/.venv/bin/python' '/home/swasarya/softtestv2/format-based-fuzzer/afl-cidrize-benchmark/afl_cidrize_harness.py'
